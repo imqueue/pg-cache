@@ -121,8 +121,8 @@ export function PgCache(options: PgCacheOptions): PgCacheDecorator {
             } as any);
 
             // noinspection JSUnusedGlobalSymbols
-            public async init(...args: any[]): Promise<void> {
-                const init = constructor.prototype.init;
+            public async start(...args: any[]): Promise<void> {
+                const init = constructor.prototype.start;
 
                 if (init && typeof init === 'function') {
                     await init.apply(this, args);
