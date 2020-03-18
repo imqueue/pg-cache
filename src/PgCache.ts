@@ -183,7 +183,7 @@ export function PgCache(options: PgCacheOptions): PgCacheDecorator {
             }
         }
 
-        const proto = new CachedService();
+        const proto: any = new CachedService();
 
         for (const prop of Object.keys(proto)) {
             constructor.prototype[prop] = proto[prop];
