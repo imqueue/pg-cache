@@ -56,28 +56,16 @@ export function cacheWith(options: CacheWithOptions): CachedWithDecorator {
             : target.constructor.name;
         const ttl = options.ttl || defaultTtl;
 
-        // noinspection SuspiciousTypeOfGuard
-        if (!(target.pubSub instanceof PgPubSub) ||
-            !(target.taggedCache instanceof TagCache) ||
-            !target.pgCacheChannels
-        ) {
-            (target.logger || console).warn(
-                'Decorator @cachedWith is used on object which seems was not ' +
-                'wrapped with @PgCache. Data:', className, methodName,
-            );
-            return ;
+        if (!target.pgCacheChannels) {
+            target.pgCacheChannels = {};
         }
 
-        const pubSub: PgPubSub = target.pubSub;
-
         for (const channel of options.channels) {
-            pubSub.channels.on(channel, () => target.taggedCache.invalidate(
-                `${ className }:${ String(methodName) }`,
-            ));
-
-            if (!~target.pgCacheChannels.indexOf(channel)) {
-                target.pgCacheChannels.push(channel);
+            if (!target.pgCacheChannels[channel]) {
+                target.pgCacheChannels[channel] = [];
             }
+
+            target.pgCacheChannels[channel].push(String(methodName));
         }
 
         // tslint:disable-next-line:only-arrow-functions

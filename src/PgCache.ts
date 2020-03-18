@@ -28,7 +28,11 @@ export interface PgCacheOptions {
 export interface PgCacheable {
     taggedCache: TagCache;
     pubSub: PgPubSub;
-    pgCacheChannels: string[];
+    pgCacheChannels: PgChannels;
+}
+
+export interface PgChannels {
+    [name: string]: string[];
 }
 
 export type PgCacheDecorator = <T extends new(...args: any[]) => {}>(
@@ -111,11 +115,10 @@ export function PgCache(options: PgCacheOptions): PgCacheDecorator {
     ): T & PgCacheable => {
         class CachedService {
             private taggedCache: TagCache;
+            private pgCacheChannels: PgChannels;
             private pubSub: PgPubSub = new PgPubSub({
                 connectionString: options.postgres,
             } as any);
-            // noinspection JSMismatchedCollectionQueryUpdate
-            private pgCacheChannels: string[] = [];
 
             // noinspection JSUnusedGlobalSymbols
             public async init(...args: any[]): Promise<void> {
@@ -150,11 +153,33 @@ export function PgCache(options: PgCacheOptions): PgCacheDecorator {
                 // noinspection TypeScriptUnresolvedVariable
                 this.taggedCache = new TagCache(cache);
 
+                const channels = Object.keys(this.pgCacheChannels);
+                const className = constructor.name;
+
+                for (const channel of channels) {
+                    this.pubSub.channels.on(channel, () => {
+                        const methods = this.pgCacheChannels[channel] || [];
+
+                        for (const method of methods) {
+                            this.taggedCache.invalidate(
+                                `${ className }:${ method }`,
+                            );
+                        }
+                    });
+                }
+
+                this.pubSub.on('connect', async () => {
+                    await install(
+                        Object.keys(this.pgCacheChannels),
+                        this.pubSub.pgClient,
+                    );
+
+                    await Promise.all(channels.map(async channel =>
+                        await this.pubSub.listen(channel)),
+                    );
+                });
+
                 await this.pubSub.connect();
-                await install(this.pgCacheChannels, this.pubSub.pgClient);
-                await Promise.all(this.pgCacheChannels.map(async channel =>
-                    await this.pubSub.listen(channel)),
-                );
             }
         }
 
