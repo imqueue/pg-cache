@@ -16,6 +16,7 @@
 import { RedisCache } from '@imqueue/rpc';
 import { TagCache } from '@imqueue/tag-cache';
 import { PgPubSub } from '@imqueue/pg-pubsub';
+import { Client } from 'pg';
 
 export interface PgCacheOptions {
     prefix?: string;
@@ -34,6 +35,75 @@ export type PgCacheDecorator = <T extends new(...args: any[]) => {}>(
     constructor: T,
 ) => T & PgCacheable;
 
+async function install(channels: string[], pg: Client): Promise<void> {
+    try {
+        await pg.query(`
+            CREATE FUNCTION post_change_notify_trigger()
+            RETURNS TRIGGER
+            LANGUAGE plpgsql
+            AS $$
+            DECLARE
+                rec RECORD;
+                payload TEXT;
+                payload_items TEXT[];
+                column_names TEXT[];
+                column_name TEXT;
+                column_value TEXT;
+                channel CHARACTER VARYING(255);
+            BEGIN
+                channel := TG_TABLE_NAME;
+
+                CASE TG_OP
+                    WHEN 'INSERT', 'UPDATE' THEN rec := NEW;
+                    WHEN 'DELETE' THEN rec := OLD;
+                    ELSE RAISE EXCEPTION 'NOTIFY: Invalid operation "%"!',
+                        TG_OP;
+                END CASE;
+
+                SELECT array_agg("c"."column_name"::TEXT)
+                INTO column_names
+                FROM "information_schema"."columns" AS "c"
+                WHERE "c"."table_name" = TG_TABLE_NAME;
+
+                FOREACH column_name IN ARRAY column_names
+                LOOP
+                    EXECUTE FORMAT('SELECT $1.%I::TEXT', column_name)
+                        INTO column_value
+                        USING rec;
+
+                    payload_items := ARRAY_CAT(
+                        payload_items,
+                        ARRAY [column_name, column_value]
+                    );
+                END LOOP;
+
+                payload := json_build_object(
+                    'timestamp', CURRENT_TIMESTAMP,
+                    'operation', TG_OP,
+                    'schema', TG_TABLE_SCHEMA,
+                    'table', TG_TABLE_NAME,
+                    'record', TO_JSON(JSON_OBJECT(payload_items))
+                );
+
+                PERFORM PG_NOTIFY(channel, payload);
+
+                RETURN rec;
+            END;
+            $$;
+        `);
+
+        await Promise.all(channels.map(channel => pg.query(`
+            CREATE TRIGGER "post_change_notify"
+                AFTER INSERT OR UPDATE OR DELETE
+                ON "$1"
+                FOR EACH ROW
+            EXECUTE PROCEDURE post_change_notify_trigger();
+        `, [channel])));
+    } catch (err) {
+        return ; // ignore
+    }
+}
+
 // noinspection JSUnusedGlobalSymbols
 export function PgCache(options: PgCacheOptions): PgCacheDecorator {
     return <T extends new(...args: any[]) => {}>(
@@ -50,6 +120,11 @@ export function PgCache(options: PgCacheOptions): PgCacheDecorator {
             // noinspection JSUnusedGlobalSymbols
             public async init(...args: any[]): Promise<void> {
                 const init = constructor.prototype.init;
+
+                if (init && typeof init === 'function') {
+                    await init.apply(this, args);
+                }
+
                 let cache: RedisCache;
 
                 if (options.redisCache) {
@@ -74,14 +149,12 @@ export function PgCache(options: PgCacheOptions): PgCacheDecorator {
 
                 // noinspection TypeScriptUnresolvedVariable
                 this.taggedCache = new TagCache(cache);
+
                 await this.pubSub.connect();
-
-                await Promise.all(this.pgCacheChannels
-                    .map(async channel => await this.pubSub.listen(channel)));
-
-                if (init && typeof init === 'function') {
-                    await init.apply(this, args);
-                }
+                await install(this.pgCacheChannels, this.pubSub.pgClient);
+                await Promise.all(this.pgCacheChannels.map(async channel =>
+                    await this.pubSub.listen(channel)),
+                );
             }
         } as unknown as T & PgCacheable;
     };
