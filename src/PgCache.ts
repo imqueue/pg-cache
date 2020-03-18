@@ -109,7 +109,7 @@ export function PgCache(options: PgCacheOptions): PgCacheDecorator {
     return <T extends new(...args: any[]) => {}>(
         constructor: T,
     ): T & PgCacheable => {
-        class CachedService extends constructor {
+        class CachedService {
             private taggedCache: TagCache;
             private pubSub: PgPubSub = new PgPubSub({
                 connectionString: options.postgres,
@@ -158,7 +158,7 @@ export function PgCache(options: PgCacheOptions): PgCacheDecorator {
             }
         }
 
-        Object.assign(constructor.prototype, CachedService.prototype);
+        Object.assign(constructor.prototype, new CachedService());
 
         return constructor as unknown as T & PgCacheable;
     };
