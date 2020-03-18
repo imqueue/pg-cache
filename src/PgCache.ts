@@ -113,6 +113,8 @@ export function PgCache(options: PgCacheOptions): PgCacheDecorator {
     return <T extends new(...args: any[]) => {}>(
         constructor: T,
     ): T & PgCacheable => {
+        const init = constructor.prototype.start;
+
         class CachedService {
             private taggedCache: TagCache;
             private pgCacheChannels: PgChannels;
@@ -122,8 +124,6 @@ export function PgCache(options: PgCacheOptions): PgCacheDecorator {
 
             // noinspection JSUnusedGlobalSymbols
             public async start(...args: any[]): Promise<void> {
-                const init = constructor.prototype.start;
-
                 if (init && typeof init === 'function') {
                     await init.apply(this, args);
                 }
@@ -183,7 +183,13 @@ export function PgCache(options: PgCacheOptions): PgCacheDecorator {
             }
         }
 
-        Object.assign(constructor.prototype, new CachedService());
+        const proto = new CachedService();
+
+        for (const prop of Object.keys(proto)) {
+            constructor.prototype[prop] = proto[prop];
+        }
+
+        constructor.prototype.start = CachedService.prototype.start;
 
         return constructor as unknown as T & PgCacheable;
     };
