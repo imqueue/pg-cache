@@ -1,0 +1,99 @@
+{
+  "name": "@imqueue/pg-cache",
+  "version": "0.0.0",
+  "description": "PostgreSQL managed cache on Redis for @imqueue-based service methods",
+  "keywords": [
+    "cache",
+    "redis",
+    "postgres",
+    "postgresql",
+    "imqueue",
+    "services"
+  ],
+  "scripts": {
+    "prepublishOnly": "npm run build",
+    "clean:dts": "find . -name '*.d.ts' -not -wholename '*node_modules*' -type f -delete",
+    "clean:map": "find . -name '*.js.map' -not -wholename '*node_modules*' -type f -delete",
+    "clean:js": "find . -name '*.js' -not -wholename '*node_modules*' -not -wholename '*bin*' -type f -delete",
+    "clean:build": "rm -rf ./node_modules/@types ; find . -name '*.js.map' -type f -delete ; find . -name '*.ts' -type f -delete",
+    "clean:test": "rm -rf .nyc_output coverage",
+    "clean:doc": "rm -rf docs",
+    "clean:wiki": "rm -rf wiki",
+    "clean": "npm run clean:test ; npm run clean:dts ; npm run clean:map ; npm run clean:js ; npm run clean:doc ; npm run clean:wiki",
+    "build": "tsc",
+    "mocha": "nyc mocha",
+    "show:test": "/usr/bin/env node -e \"require('open')('file://`pwd`/coverage/index.html',{wait:false});\"",
+    "show:doc": "/usr/bin/env node -e \"require('open')('file://`pwd`/docs/index.html',{wait:false});\"",
+    "test": "npm run build && npm run mocha && npm run show:test && ((test ! -z \"${CI}\" && nyc report --reporter=text-lcov | coveralls) || exit 0)",
+    "doc": "npm run clean && typedoc --excludePrivate --excludeExternals --hideGenerator --exclude \"**/+(debug|test|node_modules|docs|coverage|.nyc_output|examples)/**/*\" --mode file --out ./docs --plugin typedoc-plugin-as-member-of . && npm run show:doc",
+    "help": "npm-scripts-help"
+  },
+  "author": "imqueue.com <support@imqueue.com>",
+  "license": "ISC",
+  "repository": {
+    "type": "git",
+    "url": "git://github.com/imqueue/pg-pubsub.git"
+  },
+  "bugs": {
+    "url": "https://github.com/imqueue/pg-cache/issues"
+  },
+  "homepage": "https://github.com/imqueue/pg-cache",
+  "dependencies": {
+    "@imqueue/core": "^1.7.3",
+    "@imqueue/pg-pubsub": "^1.3.7",
+    "@imqueue/rpc": "^1.10.7",
+    "@imqueue/tag-cache": "^1.0.5"
+  },
+  "devDependencies": {
+    "@types/chai": "^4.2.11",
+    "@types/mocha": "^7.0.2",
+    "@types/mock-require": "^2.0.0",
+    "@types/node": "^13.9.1",
+    "@types/sinon": "^7.5.2",
+    "@typescript-eslint/eslint-plugin": "^2.24.0",
+    "@typescript-eslint/parser": "^2.24.0",
+    "@typescript-eslint/typescript-estree": "^2.24.0",
+    "chai": "^4.2.0",
+    "coveralls": "^3.0.9",
+    "eslint": "^6.8.0",
+    "glob": "^7.1.6",
+    "minimist": ">=1.2.5",
+    "mocha": "^7.1.1",
+    "mocha-lcov-reporter": "^1.3.0",
+    "mock-require": "^3.0.3",
+    "npm-scripts-help": "^0.8.0",
+    "nyc": "^15.0.0",
+    "open": "^7.0.3",
+    "sinon": "^9.0.1",
+    "source-map-support": "^0.5.16",
+    "ts-node": "^8.6.2",
+    "typedoc": "^0.17.1",
+    "typedoc-plugin-as-member-of": "^1.0.2",
+    "typedoc-plugin-markdown": "^2.2.17",
+    "typescript": "^3.8.3"
+  },
+  "main": "index.js",
+  "typescript": {
+    "definitions": "index.d.ts"
+  },
+  "nyc": {
+    "check-coverage": true,
+    "extension": [
+      ".ts"
+    ],
+    "exclude": [
+      "**/*.d.ts",
+      "**/test/**",
+      "**/examples/**"
+    ],
+    "require": [
+      "ts-node/register"
+    ],
+    "reporter": [
+      "html",
+      "text",
+      "text-summary",
+      "lcovonly"
+    ]
+  }
+}
