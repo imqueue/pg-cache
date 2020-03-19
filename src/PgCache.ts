@@ -13,7 +13,7 @@
  * OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
  * PERFORMANCE OF THIS SOFTWARE.
  */
-import { RedisCache } from '@imqueue/rpc';
+import { ILogger, JsonObject, RedisCache } from '@imqueue/rpc';
 import { TagCache } from '@imqueue/tag-cache';
 import { PgPubSub } from '@imqueue/pg-pubsub';
 import { Client } from 'pg';
@@ -32,7 +32,7 @@ export interface PgCacheable {
 }
 
 export interface PgChannels {
-    [name: string]: string[];
+    [name: string]: [string, ChannelFilter | undefined][];
 }
 
 export type PgCacheDecorator = <T extends new(...args: any[]) => {}>(
@@ -108,6 +108,59 @@ async function install(channels: string[], pg: Client): Promise<void> {
     }
 }
 
+export enum ChannelOperation {
+    // noinspection JSUnusedGlobalSymbols
+    INSERT = 'INSERT',
+    UPDATE = 'UPDATE',
+    DELETE = 'DELETE',
+}
+
+export interface ChannelPayload {
+    timestamp: Date;
+    operation: ChannelOperation;
+    schema: string;
+    table: string;
+    record: JsonObject;
+}
+
+export type ChannelPayloadFilter = (payload: ChannelPayload) => boolean;
+export type ChannelFilter = ChannelOperation[] | ChannelPayloadFilter;
+
+export interface FilteredChannels {
+    [channel: string]: ChannelFilter;
+}
+
+function invalidate(
+    cache: TagCache,
+    className: string,
+    method: string,
+    payload: ChannelPayload,
+    logger: ILogger,
+    filter?: ChannelFilter,
+): void {
+    let needInvalidate = true;
+
+    if (Array.isArray(filter)) {
+        if (!~filter.indexOf(payload.operation)) {
+            needInvalidate = false;
+        }
+    } else if (typeof filter === 'function') {
+        payload.timestamp = new Date(payload.timestamp);
+        needInvalidate = !!filter(payload);
+    }
+
+    if (!needInvalidate) {
+        return ;
+    }
+
+    cache.invalidate(`${ className }:${ method }`).catch(err =>
+        logger.warn(
+            `Error invalidating cache for ${ className }:${ method }:`,
+            err,
+        ),
+    );
+}
+
 // noinspection JSUnusedGlobalSymbols
 export function PgCache(options: PgCacheOptions): PgCacheDecorator {
     return <T extends new(...args: any[]) => {}>(
@@ -157,12 +210,17 @@ export function PgCache(options: PgCacheOptions): PgCacheDecorator {
                 const className = constructor.name;
 
                 for (const channel of channels) {
-                    this.pubSub.channels.on(channel, () => {
+                    this.pubSub.channels.on(channel, payload => {
                         const methods = this.pgCacheChannels[channel] || [];
 
-                        for (const method of methods) {
-                            this.taggedCache.invalidate(
-                                `${ className }:${ method }`,
+                        for (const [method, filter] of methods) {
+                            invalidate(
+                                this.taggedCache,
+                                className,
+                                method,
+                                payload as unknown as ChannelPayload,
+                                (this as any).logger || console,
+                                filter,
                             );
                         }
                     });

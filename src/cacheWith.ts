@@ -15,7 +15,7 @@
  */
 import { signature } from '@imqueue/rpc';
 import { TagCache } from '@imqueue/tag-cache';
-import { PgCacheable } from './PgCache';
+import { FilteredChannels, PgCacheable } from './PgCache';
 
 const defaultTtl = 86400000; // 24 hrs in milliseconds
 
@@ -37,9 +37,9 @@ export interface CacheWithOptions {
      * PgBubSub channels to listen for invalidation. Usually channels are
      * table names.
      *
-     * @type {string[]}
+     * @type {string[] | FilteredChannels}
      */
-    channels: string[];
+    channels: string[] | FilteredChannels;
 }
 
 // noinspection JSUnusedGlobalSymbols
@@ -59,12 +59,20 @@ export function cacheWith(options: CacheWithOptions): CachedWithDecorator {
             target.pgCacheChannels = {};
         }
 
-        for (const channel of options.channels) {
+        const isFiltered = !Array.isArray(options.channels);
+        const channels: string[] = isFiltered
+            ? Object.keys(options.channels)
+            : options.channels as string[];
+
+        for (const channel of channels) {
             if (!target.pgCacheChannels[channel]) {
                 target.pgCacheChannels[channel] = [];
             }
 
-            target.pgCacheChannels[channel].push(String(methodName));
+            target.pgCacheChannels[channel].push(isFiltered ? [
+                String(methodName),
+                (options.channels as FilteredChannels)[channel]
+            ] : [String(methodName)]);
         }
 
         // tslint:disable-next-line:only-arrow-functions
