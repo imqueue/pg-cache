@@ -123,7 +123,11 @@ export interface ChannelPayload {
     record: JsonObject;
 }
 
-export type ChannelPayloadFilter = (payload: ChannelPayload) => boolean;
+export type ChannelPayloadFilter = (
+    payload: ChannelPayload,
+    args: any[],
+) => boolean;
+
 export type ChannelFilter = ChannelOperation[] | ChannelPayloadFilter;
 
 export interface FilteredChannels {
@@ -135,6 +139,7 @@ function invalidate(
     className: string,
     method: string,
     payload: ChannelPayload,
+    args: any[],
     logger: ILogger,
     filter?: ChannelFilter,
 ): void {
@@ -146,7 +151,7 @@ function invalidate(
         }
     } else if (typeof filter === 'function') {
         payload.timestamp = new Date(payload.timestamp);
-        needInvalidate = !!filter(payload);
+        needInvalidate = !!filter(payload, args);
     }
 
     if (!needInvalidate) {
@@ -219,6 +224,7 @@ export function PgCache(options: PgCacheOptions): PgCacheDecorator {
                                 className,
                                 method,
                                 payload as unknown as ChannelPayload,
+                                args,
                                 (this as any).logger || console,
                                 filter,
                             );
