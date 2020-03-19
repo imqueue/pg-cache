@@ -13,16 +13,50 @@
  * OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
  * PERFORMANCE OF THIS SOFTWARE.
  */
-import { ILogger, JsonObject, RedisCache } from '@imqueue/rpc';
+import { AnyJson, IMQService, JsonObject, RedisCache } from '@imqueue/rpc';
 import { TagCache } from '@imqueue/tag-cache';
 import { PgPubSub } from '@imqueue/pg-pubsub';
 import { Client } from 'pg';
 
 export interface PgCacheOptions {
+    /**
+     * Redis cache key prefix to use. If not specified, decorated service
+     * class name will be used as prefix by default.
+     *
+     * @type {string}
+     */
     prefix?: string;
+
+    /**
+     * PostgreSQL database connection string
+     *
+     * @type {string}
+     */
     postgres: string;
+
+    /**
+     * Redis connection options
+     *
+     * @type {{ host: string, port: number }}
+     */
     redis?: { host: string; port: number; };
+
+    /**
+     * Initialized redis cache instance. One of redis option or this redisCache
+     * option is required to be provided
+     *
+     * @type {RedisCache}
+     */
     redisCache?: RedisCache;
+
+    /**
+     * Of passed, database channel event will be published by a service
+     * to connected clients. This could allow to organize client-side
+     * caching and invalidations.
+     *
+     * @type {boolean}
+     */
+    publish?: boolean;
 }
 
 export interface PgCacheable {
@@ -135,13 +169,14 @@ export interface FilteredChannels {
 }
 
 function invalidate(
-    cache: TagCache,
+    self: any & PgCacheable,
+    channel: string,
     className: string,
     method: string,
     payload: ChannelPayload,
     args: any[],
-    logger: ILogger,
     filter?: ChannelFilter,
+    publish?: boolean,
 ): void {
     let needInvalidate = true;
 
@@ -158,12 +193,20 @@ function invalidate(
         return ;
     }
 
-    cache.invalidate(`${ className }:${ method }`).catch(err =>
-        logger.warn(
+    self.taggedCache.invalidate(`${ className }:${ method }`)
+        .catch((err: any) => self.logger.warn(
             `Error invalidating cache for ${ className }:${ method }:`,
             err,
-        ),
-    );
+        ));
+
+    if (publish && typeof self.publish === 'function') {
+        (self as IMQService)
+            .publish({ channel, payload: payload as unknown as AnyJson })
+            .catch((err: any) => self.logger.warn(
+                `Service publish caching db channel error on ${
+                    className }:${ method }:`, err,
+            ));
+    }
 }
 
 // noinspection JSUnusedGlobalSymbols
@@ -220,13 +263,14 @@ export function PgCache(options: PgCacheOptions): PgCacheDecorator {
 
                         for (const [method, filter] of methods) {
                             invalidate(
-                                this.taggedCache,
+                                this,
+                                channel,
                                 className,
                                 method,
                                 payload as unknown as ChannelPayload,
                                 args,
-                                (this as any).logger || console,
                                 filter,
+                                options.publish,
                             );
                         }
                     });
