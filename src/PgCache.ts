@@ -201,7 +201,11 @@ function invalidate(
 
     if (publish && typeof self.publish === 'function') {
         (self as IMQService)
-            .publish({ channel, payload: payload as unknown as AnyJson })
+            .publish({
+                channel,
+                payload: payload as unknown as AnyJson,
+                tag: `${ className }:${ method }`,
+            })
             .catch((err: any) => self.logger.warn(
                 `Service publish caching db channel error on ${
                     className }:${ method }:`, err,
