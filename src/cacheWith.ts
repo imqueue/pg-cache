@@ -15,7 +15,6 @@
  */
 import { signature } from '@imqueue/rpc';
 import { TagCache } from '@imqueue/tag-cache';
-import { PgPubSub } from '@imqueue/pg-pubsub';
 import { PgCacheable } from './PgCache';
 
 const defaultTtl = 86400000; // 24 hrs in milliseconds
@@ -73,6 +72,11 @@ export function cacheWith(options: CacheWithOptions): CachedWithDecorator {
             const cache: TagCache = target.taggedCache;
 
             if (!cache) {
+                (target.logger || console).warn(
+                    `Cache is not initialized on ${ className }, called in ${
+                        String(methodName)
+                    }`,
+                );
                 return original.apply(target, args);
             }
 
