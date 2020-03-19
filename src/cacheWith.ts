@@ -69,15 +69,16 @@ export function cacheWith(options: CacheWithOptions): CachedWithDecorator {
 
         // tslint:disable-next-line:only-arrow-functions
         descriptor.value = async function<T>(...args: any[]): Promise<T> {
-            const cache: TagCache = target.taggedCache;
+            const self = this || target;
+            const cache: TagCache = self.taggedCache;
 
             if (!cache) {
-                (target.logger || console).warn(
+                (self.logger || console).warn(
                     `Cache is not initialized on ${ className }, called in ${
                         String(methodName)
                     }`,
                 );
-                return original.apply(target, args);
+                return original.apply(self, args);
             }
 
             try {
@@ -88,7 +89,7 @@ export function cacheWith(options: CacheWithOptions): CachedWithDecorator {
 
                 // eslint-disable-next-line id-blacklist
                 if (result === null || result === undefined) {
-                    result = original.apply(target, args);
+                    result = original.apply(self, args);
 
                     if (result && result.then) {
                         result = await result;
@@ -96,7 +97,7 @@ export function cacheWith(options: CacheWithOptions): CachedWithDecorator {
 
                     cache.set(key, result, [
                         `${ className }:${ String(methodName) }`,
-                    ], ttl).catch(err => (target.logger || console).warn(`${
+                    ], ttl).catch(err => (self.logger || console).warn(`${
                         className}:${
                         String(methodName)} cache save error:`,
                         err,
@@ -108,14 +109,14 @@ export function cacheWith(options: CacheWithOptions): CachedWithDecorator {
 
             catch (err) {
                 // istanbul ignore next
-                (target.logger || console).warn(`${
+                (self.logger || console).warn(`${
                     className}:${
                     String(methodName)} cache fetch error:`,
                     err,
                 );
 
                 // istanbul ignore next
-                return original.apply(target, args);
+                return original.apply(self, args);
             }
         };
     };
