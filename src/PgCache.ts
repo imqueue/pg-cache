@@ -17,6 +17,7 @@ import { AnyJson, IMQService, JsonObject, RedisCache } from '@imqueue/rpc';
 import { TagCache } from '@imqueue/tag-cache';
 import { PgPubSub } from '@imqueue/pg-pubsub';
 import { Client } from 'pg';
+import { PG_CACHE_DEBUG, PG_CACHE_TRIGGER } from './env';
 
 export interface PgCacheOptions {
     /**
@@ -57,6 +58,18 @@ export interface PgCacheOptions {
      * @type {boolean}
      */
     publish?: boolean;
+
+    /**
+     * SQL definition of the trigger function, in case default which is used
+     * by this lib is not satisfying for some reason. Expected string
+     * starting with
+     * 'create function post_change_notify_trigger() returns trigger'
+     * or will fall back to a default trigger definition. Spaces and case is
+     * ignored, 'or replace statement is allowed', if needed.
+     *
+     * @type {string}
+     */
+    triggerDefinition?: string;
 }
 
 export interface PgCacheable {
@@ -73,63 +86,45 @@ export type PgCacheDecorator = <T extends new(...args: any[]) => {}>(
     constructor: T,
 ) => T & PgCacheable;
 
-async function install(channels: string[], pg: Client): Promise<void> {
+const RX_TRIGGER = new RegExp(
+    'create\\s+(or\\s+replace)?function\\s+' +
+    'post_change_notify_trigger\\s+\\([^)]*\\).*?returns\\s+trigger',
+    'i',
+);
+
+/**
+ * Checks if a given definition valid. If not - will return default trigger
+ * definition.
+ *
+ * @see PG_CACHE_TRIGGER
+ * @access private
+ * @param {string} [definition]
+ * @return {string}
+ */
+function triggerDef(definition?: string): string {
+    if (!RX_TRIGGER.test(definition + '')) {
+        return PG_CACHE_TRIGGER;
+    }
+
+    return definition as string;
+}
+
+/**
+ * Installs database triggers
+ *
+ * @access private
+ * @param {string[]} channels
+ * @param {Client} pg
+ * @param {string} triggerDefinition
+ * @return {Promise<void>}
+ */
+async function install(
+    channels: string[],
+    pg: Client,
+    triggerDefinition: string,
+): Promise<void> {
     try {
-        await pg.query(`
-            CREATE FUNCTION post_change_notify_trigger()
-            RETURNS TRIGGER
-            LANGUAGE plpgsql
-            AS $$
-            DECLARE
-                rec RECORD;
-                payload TEXT;
-                payload_items TEXT[];
-                column_names TEXT[];
-                column_name TEXT;
-                column_value TEXT;
-                channel CHARACTER VARYING(255);
-            BEGIN
-                channel := TG_TABLE_NAME;
-
-                CASE TG_OP
-                    WHEN 'INSERT', 'UPDATE' THEN rec := NEW;
-                    WHEN 'DELETE' THEN rec := OLD;
-                    ELSE RAISE EXCEPTION 'NOTIFY: Invalid operation "%"!',
-                        TG_OP;
-                END CASE;
-
-                SELECT array_agg("c"."column_name"::TEXT)
-                INTO column_names
-                FROM "information_schema"."columns" AS "c"
-                WHERE "c"."table_name" = TG_TABLE_NAME;
-
-                FOREACH column_name IN ARRAY column_names
-                LOOP
-                    EXECUTE FORMAT('SELECT $1.%I::TEXT', column_name)
-                        INTO column_value
-                        USING rec;
-
-                    payload_items := ARRAY_CAT(
-                        payload_items,
-                        ARRAY [column_name, column_value]
-                    );
-                END LOOP;
-
-                payload := json_build_object(
-                    'timestamp', CURRENT_TIMESTAMP,
-                    'operation', TG_OP,
-                    'schema', TG_TABLE_SCHEMA,
-                    'table', TG_TABLE_NAME,
-                    'record', TO_JSON(JSON_OBJECT(payload_items))
-                );
-
-                PERFORM PG_NOTIFY(channel, payload);
-
-                RETURN rec;
-            END;
-            $$;
-        `);
-
+        await pg.query(triggerDefinition);
         await Promise.all(channels.map(channel => pg.query(`
             CREATE TRIGGER "post_change_notify"
                 AFTER INSERT OR UPDATE OR DELETE
@@ -194,8 +189,19 @@ function invalidate(
     }
 
     self.taggedCache.invalidate(`${ className }:${ method }`)
+        .then((result: any) => {
+            if (!PG_CACHE_DEBUG) {
+                return result;
+            }
+
+            self.logger.info(
+                `PgCache: key '${ className }:${ method }' invalidated!`,
+            );
+
+            return result;
+        })
         .catch((err: any) => self.logger.warn(
-            `Error invalidating cache for ${ className }:${ method }:`,
+            `PgCache: error invalidating '${ className }:${ method }':`,
             err,
         ));
 
@@ -206,10 +212,30 @@ function invalidate(
                 payload: payload as unknown as AnyJson,
                 tag: `${ className }:${ method }`,
             })
+            .then((result: any) => {
+                if (!PG_CACHE_DEBUG) {
+                    return result;
+                }
+
+                self.logger.info(
+                    `PgCache: tag '${
+                        className }:${ method
+                    }' published to client with:`,
+                    channel,
+                    payload,
+                );
+
+                return result;
+            })
             .catch((err: any) => self.logger.warn(
-                `Service publish caching db channel error on ${
-                    className }:${ method }:`, err,
+                `PgCache: error publishing '${
+                    className }:${ method }':`,
+                err,
             ));
+    } else if (PG_CACHE_DEBUG) {
+        self.logger.info(`PgCache: publish method does not exist on ${
+            self.constructor.name
+        }`);
     }
 }
 
@@ -260,9 +286,17 @@ export function PgCache(options: PgCacheOptions): PgCacheDecorator {
 
                 const channels = Object.keys(this.pgCacheChannels);
                 const className = constructor.name;
+                const logger = ((this as any).logger || console);
 
                 for (const channel of channels) {
                     this.pubSub.channels.on(channel, payload => {
+                        if (PG_CACHE_DEBUG) {
+                            logger.info(
+                                'PgCache: database event caught:',
+                                channel, payload,
+                            );
+                        }
+
                         const methods = this.pgCacheChannels[channel] || [];
 
                         for (const [method, filter] of methods) {
@@ -284,11 +318,24 @@ export function PgCache(options: PgCacheOptions): PgCacheDecorator {
                     await install(
                         Object.keys(this.pgCacheChannels),
                         this.pubSub.pgClient,
+                        triggerDef(options.triggerDefinition),
                     );
+
+                    if (PG_CACHE_DEBUG) {
+                        logger.info(`PgCache: triggers installed for ${
+                            this.constructor.name
+                        }`);
+                    }
 
                     await Promise.all(channels.map(async channel =>
                         await this.pubSub.listen(channel)),
                     );
+
+                    if (PG_CACHE_DEBUG) {
+                        logger.info(`PgCache: listening channels ${
+                            channels.join(', ')
+                        } on  ${ this.constructor.name }`);
+                    }
                 });
 
                 await this.pubSub.connect();
