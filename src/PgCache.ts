@@ -315,8 +315,11 @@ export function PgCache(options: PgCacheOptions): PgCacheDecorator {
                 const channels = Object.keys(this.pgCacheChannels);
                 const className = constructor.name;
                 const logger = ((this as any).logger || console);
+                const maxListeners = channels.length * 2;
 
-                this.pubSub.channels.setMaxListeners(channels.length + 1);
+                this.pubSub.channels.setMaxListeners(maxListeners);
+                this.pubSub.setMaxListeners(maxListeners);
+                this.pubSub.pgClient.setMaxListeners(maxListeners);
 
                 for (const channel of channels) {
                     this.pubSub.channels.on(channel, payload => {
