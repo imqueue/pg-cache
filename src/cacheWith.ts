@@ -16,6 +16,7 @@
 import { signature } from '@imqueue/rpc';
 import { TagCache } from '@imqueue/tag-cache';
 import { FilteredChannels, PgCacheable } from './PgCache';
+import { PG_CACHE_DEBUG } from './env';
 
 const defaultTtl = 86400000; // 24 hrs in milliseconds
 
@@ -79,10 +80,13 @@ export function cacheWith(options: CacheWithOptions): CachedWithDecorator {
         descriptor.value = async function<T>(...args: any[]): Promise<T> {
             const self = this || target;
             const cache: TagCache = self.taggedCache;
+            const logger = (self.logger || console);
 
             if (!cache) {
-                (self.logger || console).warn(
-                    `Cache is not initialized on ${ className }, called in ${
+                logger.warn(
+                    `PgCache:cacheWith: cache is not initialized on ${
+                        className
+                    }, called in ${
                         String(methodName)
                     }`,
                 );
@@ -103,11 +107,27 @@ export function cacheWith(options: CacheWithOptions): CachedWithDecorator {
                         result = await result;
                     }
 
-                    cache.set(key, result, [
-                        `${ className }:${ String(methodName) }`,
-                    ], ttl).catch(err => (self.logger || console).warn(`${
-                        className}:${
-                        String(methodName)} cache save error:`,
+                    cache.set(
+                        key,
+                        result,
+                        [`${ className }:${ String(methodName) }`],
+                        ttl,
+                    ).then((res: any) => {
+                        if (!PG_CACHE_DEBUG) {
+                            return res;
+                        }
+
+                        logger.info(
+                            `PgCache:cacheWith: data saved to cache key ${
+                                key
+                            }`,
+                        );
+
+                        return res;
+                    }).catch(err => logger.warn(
+                        `PgCache:cacheWith: saving cache key '${
+                            className }:${ String(methodName)
+                        }' error:`,
                         err,
                     ));
                 }
@@ -117,9 +137,10 @@ export function cacheWith(options: CacheWithOptions): CachedWithDecorator {
 
             catch (err) {
                 // istanbul ignore next
-                (self.logger || console).warn(`${
-                    className}:${
-                    String(methodName)} cache fetch error:`,
+                logger.warn(
+                    `PgCache:cacheWith: fetching cache key '${
+                        className}:${ String(methodName)
+                    }' error:`,
                     err,
                 );
 
