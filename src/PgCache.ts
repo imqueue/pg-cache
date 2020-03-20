@@ -13,7 +13,13 @@
  * OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
  * PERFORMANCE OF THIS SOFTWARE.
  */
-import { AnyJson, IMQService, JsonObject, RedisCache } from '@imqueue/rpc';
+import {
+    AnyJson,
+    ILogger,
+    IMQService,
+    JsonObject,
+    RedisCache,
+} from '@imqueue/rpc';
 import { TagCache } from '@imqueue/tag-cache';
 import { PgPubSub } from '@imqueue/pg-pubsub';
 import { Client } from 'pg';
@@ -116,25 +122,41 @@ function triggerDef(definition?: string): string {
  * @param {string[]} channels
  * @param {Client} pg
  * @param {string} triggerDefinition
+ * @param {ILogger} logger
  * @return {Promise<void>}
  */
 async function install(
     channels: string[],
     pg: Client,
     triggerDefinition: string,
+    logger: ILogger,
 ): Promise<void> {
     try {
         await pg.query(triggerDefinition);
-        await Promise.all(channels.map(channel => pg.query(`
-            CREATE TRIGGER "post_change_notify"
-                AFTER INSERT OR UPDATE OR DELETE
-                ON "$1"
-                FOR EACH ROW
-            EXECUTE PROCEDURE post_change_notify_trigger();
-        `, [channel])));
     } catch (err) {
-        return ; // ignore
+        if (PG_CACHE_DEBUG) {
+            logger.info('PgCache: create trigger function errored:', err);
+        }
     }
+
+    await Promise.all(channels.map(async channel => {
+        try {
+            await pg.query(`
+                CREATE TRIGGER "post_change_notify"
+                    AFTER INSERT OR UPDATE OR DELETE
+                    ON "$1"
+                    FOR EACH ROW
+                EXECUTE PROCEDURE post_change_notify_trigger();
+            `, [channel]);
+        } catch (err) {
+            if (PG_CACHE_DEBUG) {
+                logger.info(
+                    `PgCache: create trigger on ${ channel } errored:`,
+                    err,
+                );
+            }
+        }
+    }));
 }
 
 export enum ChannelOperation {
@@ -319,6 +341,7 @@ export function PgCache(options: PgCacheOptions): PgCacheDecorator {
                         Object.keys(this.pgCacheChannels),
                         this.pubSub.pgClient,
                         triggerDef(options.triggerDefinition),
+                        logger,
                     );
 
                     if (PG_CACHE_DEBUG) {
