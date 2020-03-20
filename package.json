@@ -42,7 +42,7 @@
     "@imqueue/core": "^1.7.3",
     "@imqueue/pg-pubsub": "^1.3.7",
     "@imqueue/rpc": "^1.10.7",
-    "@imqueue/tag-cache": "^1.1.1",
+    "@imqueue/tag-cache": "^1.1.2",
     "pg": "^7.18.2"
   },
   "devDependencies": {
