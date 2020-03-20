@@ -57,9 +57,8 @@ export interface PgCacheOptions {
     redisCache?: RedisCache;
 
     /**
-     * Of passed, database channel event will be published by a service
-     * to connected clients. This could allow to organize client-side
-     * caching and invalidations.
+     * Pass false, if database channel event should not be published by service
+     * to connected clients. By default is enabled = true.
      *
      * @type {boolean}
      */
@@ -230,7 +229,11 @@ function invalidate(
             err,
         ));
 
-    if (publish && typeof self.publish === 'function') {
+    if (typeof self.publish === 'function') {
+        if (!publish) {
+            return ;
+        }
+
         (self as IMQService)
             .publish({
                 channel,
@@ -313,6 +316,8 @@ export function PgCache(options: PgCacheOptions): PgCacheDecorator {
                 const className = constructor.name;
                 const logger = ((this as any).logger || console);
 
+                this.pubSub.channels.setMaxListeners(channels.length + 1);
+
                 for (const channel of channels) {
                     this.pubSub.channels.on(channel, payload => {
                         if (PG_CACHE_DEBUG) {
@@ -333,7 +338,7 @@ export function PgCache(options: PgCacheOptions): PgCacheDecorator {
                                 payload as unknown as ChannelPayload,
                                 args,
                                 filter,
-                                options.publish,
+                                options.publish !== false,
                             );
                         }
                     });
