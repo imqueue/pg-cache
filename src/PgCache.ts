@@ -141,17 +141,21 @@ async function install(
 
     await Promise.all(channels.map(async channel => {
         try {
-            await pg.query(`
-                CREATE TRIGGER "post_change_notify"
+            await pg.query(
+                `CREATE TRIGGER "post_change_notify"
                     AFTER INSERT OR UPDATE OR DELETE
                     ON "$1"
                     FOR EACH ROW
-                EXECUTE PROCEDURE post_change_notify_trigger();
-            `, [channel]);
+                EXECUTE PROCEDURE post_change_notify_trigger()`,
+                [channel],
+            );
+
+            if (PG_CACHE_DEBUG) {
+                logger.info(`PgCache: trigger created on ${ channel }!`);
+            }
         } catch (err) {
             if (PG_CACHE_DEBUG) {
-                logger.info(
-                    `PgCache: create trigger on ${ channel } errored:`,
+                logger.info(`PgCache: create trigger on ${ channel } errored:`,
                     err,
                 );
             }
