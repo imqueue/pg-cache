@@ -1,6 +1,6 @@
 {
   "name": "@imqueue/pg-cache",
-  "version": "1.3.4",
+  "version": "1.3.5",
   "description": "PostgreSQL managed cache on Redis for @imqueue-based service methods",
   "keywords": [
     "cache",
