@@ -278,7 +278,12 @@ export function PgCache(options: PgCacheOptions): ClassDecorator {
 
                 this.taggedCache = new TagCache(cache);
 
-                const channels = Object.keys(this.pgCacheChannels);
+                const channels = Object.keys(this.pgCacheChannels || {});
+
+                if (!(channels && channels.length)) {
+                    return ;
+                }
+
                 const className = constructor.name;
                 const maxListeners = channels.length * 2;
 
