@@ -13,6 +13,20 @@
  * OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
  * PERFORMANCE OF THIS SOFTWARE.
  */
+import { ILogger } from '@imqueue/core';
+import { PgCacheable } from './PgCache';
+
+export type ClassDecorator = <T extends new(...args: any[]) => {}>(
+    constructor: T,
+) => T & PgCacheable;
+
+export type MethodDecorator = (
+    target: any,
+    methodName: string | symbol,
+    descriptor: TypedPropertyDescriptor<(...args: any[]) => any>,
+) => void;
+
+export const DEFAULT_CACHE_TTL = 86400000; // 24 hrs in milliseconds
 export const PG_CACHE_DEBUG = !!+(process.env.PG_CACHE_DEBUG || 0);
 
 export const PG_CACHE_TRIGGER = `CREATE FUNCTION post_change_notify_trigger()
@@ -68,3 +82,51 @@ BEGIN
 END;
 $$;
 `;
+
+export function setInfo(
+    logger: ILogger,
+    res: any,
+    key: string,
+    decorator: Function,
+): any {
+    PG_CACHE_DEBUG && logger.info(
+        `PgCache:${ decorator.name }: cache key '${ key }' saved!`,
+    );
+
+    return res;
+}
+
+export function setError(
+    logger: ILogger,
+    err: any,
+    key: string,
+    decorator: Function,
+): void {
+    logger.warn(
+        `PgCache:${ decorator.name }: saving cache key '${ key }' error:`,
+        err,
+    );
+}
+
+export function fetchError(
+    logger: ILogger,
+    err: any,
+    key: string,
+    decorator: Function,
+): void {
+    logger.warn(
+        `PgCache:${ decorator.name }: fetching cache key '${ key }' error:`,
+        err,
+    );
+}
+
+export function initError(
+    logger: ILogger,
+    className: string,
+    methodName: string,
+    decorator: Function,
+): void {
+    logger.warn(`PgCache:${ decorator.name }: cache is not initialized on ${
+        className }, called in ${ methodName }`,
+    );
+}
