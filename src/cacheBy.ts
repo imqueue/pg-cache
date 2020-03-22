@@ -102,11 +102,6 @@ export function channelsOf(
     return tables;
 }
 
-export interface CacheBy {
-    (model: typeof Model, options?: CacheByOptions): MethodDecorator;
-    defaultFieldsArg: number;
-}
-
 /**
  * Decorator factory @cacheBy(Model, CacheByOptions)
  * This decorator should be used on a service methods, to set the caching
@@ -116,10 +111,10 @@ export interface CacheBy {
  * prevents unnecessary cache invalidations. So it is more intellectual way
  * to invalidate cache instead of any changes on described list of tables.
  */
-export const cacheBy: CacheBy = ((
+export function cacheBy(
     model: typeof Model,
     options?: CacheByOptions,
-): MethodDecorator => {
+): MethodDecorator {
     const opts = options || {} as CacheByOptions;
 
     return (
@@ -186,6 +181,4 @@ export const cacheBy: CacheBy = ((
             }
         };
     };
-}) as CacheBy;
-
-cacheBy.defaultFieldsArg = 2;
+}
