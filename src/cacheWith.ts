@@ -15,16 +15,15 @@
  */
 import { signature } from '@imqueue/rpc';
 import { TagCache } from '@imqueue/tag-cache';
-import { FilteredChannels, PgCacheable } from './PgCache';
-import { PG_CACHE_DEBUG } from './env';
-
-const defaultTtl = 86400000; // 24 hrs in milliseconds
-
-export type CachedWithDecorator = (
-    target: any,
-    methodName: string | symbol,
-    descriptor: TypedPropertyDescriptor<(...args: any[]) => any>,
-) => void;
+import { FilteredChannels, PgCacheable, PgCacheChannel } from './PgCache';
+import {
+    MethodDecorator,
+    DEFAULT_CACHE_TTL,
+    fetchError,
+    initError,
+    setError,
+    setInfo,
+} from './env';
 
 export interface CacheWithOptions {
     /**
@@ -41,65 +40,84 @@ export interface CacheWithOptions {
      * @type {string[] | FilteredChannels}
      */
     channels: string[] | FilteredChannels;
+
+    /**
+     * Tag to use for this cache when set a value
+     *
+     * @type {string}
+     */
+    tag?: string;
 }
 
-// noinspection JSUnusedGlobalSymbols
-export function cacheWith(options: CacheWithOptions): CachedWithDecorator {
+/**
+ * Makes channel entry from a given channel name, class method name and options.
+ *
+ * @access private
+ * @param {string} name
+ * @param {string} method
+ * @param {CacheWithOptions} options
+ * @return {PgCacheChannel}
+ */
+export function makeChannel(
+    name: string,
+    method: string,
+    options: CacheWithOptions,
+): PgCacheChannel {
+    return [method, !Array.isArray(options.channels)
+        ? (options.channels)[name]
+        : undefined,
+    ] as PgCacheChannel;
+}
+
+/**
+ * Decorator factory @cacheWith(CacheWithOptions)
+ * This decorator should be used on a service methods, to set the caching
+ * rules for a method.
+ *
+ * @param {CacheWithOptions} options
+ * @return {MethodDecorator}
+ */
+export function cacheWith(options: CacheWithOptions): MethodDecorator {
     return (
         target: any & PgCacheable,
         methodName: string | symbol,
         descriptor: TypedPropertyDescriptor<(...args: any[]) => any>,
     ): void => {
-        const original: (...args: any[]) => any = descriptor.value as any;
+        const original: Function = descriptor.value as any;
         const className = typeof target === 'function'
             ? target.name
             : target.constructor.name;
-        const ttl = options.ttl || defaultTtl;
-
-        if (!target.pgCacheChannels) {
-            target.pgCacheChannels = {};
-        }
-
+        const ttl = options.ttl || DEFAULT_CACHE_TTL;
         const isFiltered = !Array.isArray(options.channels);
         const channels: string[] = isFiltered
             ? Object.keys(options.channels)
             : options.channels as string[];
 
-        for (const channel of channels) {
-            if (!target.pgCacheChannels[channel]) {
-                target.pgCacheChannels[channel] = [];
-            }
+        target.pgCacheChannels = target.pgCacheChannels || {};
 
-            target.pgCacheChannels[channel].push(isFiltered ? [
-                String(methodName),
-                (options.channels as FilteredChannels)[channel]
-            ] : [String(methodName)]);
+        for (const channel of channels) {
+            const pgChannel = target.pgCacheChannels[channel] =
+                target.pgCacheChannels[channel] || [];
+
+            pgChannel.push(makeChannel(channel, String(methodName), options));
         }
 
-        // tslint:disable-next-line:only-arrow-functions
         descriptor.value = async function<T>(...args: any[]): Promise<T> {
             const self = this || target;
             const cache: TagCache = self.taggedCache;
             const logger = (self.logger || console);
 
             if (!cache) {
-                logger.warn(
-                    `PgCache:cacheWith: cache is not initialized on ${
-                        className
-                    }, called in ${
-                        String(methodName)
-                    }`,
-                );
+                initError(logger, className, String(methodName), cacheWith);
+
                 return original.apply(self, args);
             }
 
+            const key = signature(className, methodName, args);
+
             try {
-                const key = `${ className }:${ String(methodName) }:${
-                    signature(className, methodName, args)
-                }`;
                 let result: any = await cache.get(key);
 
-                // eslint-disable-next-line id-blacklist
                 if (result === null || result === undefined) {
                     result = original.apply(self, args);
 
@@ -107,44 +125,19 @@ export function cacheWith(options: CacheWithOptions): CachedWithDecorator {
                         result = await result;
                     }
 
-                    cache.set(
-                        key,
-                        result,
-                        [`${ className }:${ String(methodName) }`],
-                        ttl,
-                    ).then((res: any) => {
-                        if (!PG_CACHE_DEBUG) {
-                            return res;
-                        }
+                    const tags = [signature(className, methodName, [])];
 
-                        logger.info(
-                            `PgCache:cacheWith: data saved to cache key ${
-                                key
-                            }`,
-                        );
-
-                        return res;
-                    }).catch(err => logger.warn(
-                        `PgCache:cacheWith: saving cache key '${
-                            className }:${ String(methodName)
-                        }' error:`,
-                        err,
-                    ));
+                    cache.set(key, result, tags, ttl)
+                        .then(res => setInfo(logger, res, key, cacheWith))
+                        .catch(err => setError(logger, err, key, cacheWith));
                 }
 
                 return result;
             }
 
             catch (err) {
-                // istanbul ignore next
-                logger.warn(
-                    `PgCache:cacheWith: fetching cache key '${
-                        className}:${ String(methodName)
-                    }' error:`,
-                    err,
-                );
+                fetchError(logger, err, key, cacheWith);
 
-                // istanbul ignore next
                 return original.apply(self, args);
             }
         };
