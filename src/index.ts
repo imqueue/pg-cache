@@ -13,5 +13,7 @@
  * OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
  * PERFORMANCE OF THIS SOFTWARE.
  */
+export * from './env';
 export * from './PgCache';
 export * from './cacheWith';
+export * from './cacheBy';
