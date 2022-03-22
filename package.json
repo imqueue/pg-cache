@@ -42,7 +42,7 @@
     "@imqueue/core": "^1.11.9",
     "@imqueue/pg-pubsub": "^1.5.2",
     "@imqueue/rpc": "^1.13.8",
-    "@imqueue/tag-cache": "^1.2.1",
+    "@imqueue/tag-cache": "^1.2.3",
     "pg": "^8.7.1",
     "sequelize": "^5.22.4",
     "sequelize-typescript": "^1.1.0"
