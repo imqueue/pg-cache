@@ -18,7 +18,7 @@ import {
     ILogger,
     IMQService,
     JsonObject,
-    RedisCache,
+    RedisCache, signature,
 } from '@imqueue/rpc';
 import { TagCache } from '@imqueue/tag-cache';
 import { PgPubSub } from '@imqueue/pg-pubsub';
@@ -245,6 +245,7 @@ export function PgCache(options: PgCacheOptions): ClassDecorator {
         constructor: T,
     ): T & PgCacheable => {
         const init = constructor.prototype.start;
+        const pgCacheChannels = constructor.prototype.pgCacheChannels;
 
         class CachedService {
             private taggedCache: TagCache;
@@ -254,6 +255,10 @@ export function PgCache(options: PgCacheOptions): ClassDecorator {
             } as any);
 
             public async start(...args: any[]): Promise<void> {
+                this.pubSub = new PgPubSub({
+                    connectionString: options.postgres,
+                });
+
                 if (init && typeof init === 'function') {
                     await init.apply(this, args);
                 }
@@ -278,7 +283,10 @@ export function PgCache(options: PgCacheOptions): ClassDecorator {
 
                 this.taggedCache = new TagCache(cache);
 
-                const channels = Object.keys(this.pgCacheChannels || {});
+                const pgChannels = this.pgCacheChannels
+                    || pgCacheChannels
+                    || {};
+                const channels = Object.keys(pgChannels);
 
                 if (!(channels && channels.length)) {
                     return ;
@@ -298,11 +306,11 @@ export function PgCache(options: PgCacheOptions): ClassDecorator {
                             channel, payload,
                         );
 
-                        const methods = this.pgCacheChannels[channel] || [];
+                        const methods = pgChannels[channel] || [];
                         const data = payload as unknown as ChannelPayload;
 
                         for (const [method, filter] of methods) {
-                            const useTag = `${ className }:${ method }`;
+                            const useTag = signature(className, method, []);
 
                             if (needInvalidate(data, filter)) {
                                 invalidate(this, useTag);
