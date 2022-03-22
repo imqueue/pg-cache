@@ -324,7 +324,7 @@ export function PgCache(options: PgCacheOptions): ClassDecorator {
 
                 this.pubSub.on('connect', async () => {
                     await install(
-                        Object.keys(this.pgCacheChannels),
+                        Object.keys(pgChannels),
                         this.pubSub.pgClient,
                         triggerDef(options.triggerDefinition),
                         logger,
