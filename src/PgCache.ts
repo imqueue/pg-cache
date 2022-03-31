@@ -250,9 +250,7 @@ export function PgCache(options: PgCacheOptions): ClassDecorator {
         class CachedService {
             private taggedCache: TagCache;
             private pgCacheChannels: PgCacheChannels;
-            private pubSub: PgPubSub = new PgPubSub({
-                connectionString: options.postgres,
-            } as any);
+            private pubSub: PgPubSub;
 
             public async start(...args: any[]): Promise<void> {
                 this.pubSub = new PgPubSub({
