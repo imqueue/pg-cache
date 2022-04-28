@@ -40,7 +40,7 @@
   "homepage": "https://github.com/imqueue/pg-cache",
   "dependencies": {
     "@imqueue/core": "^1.11.9",
-    "@imqueue/pg-pubsub": "^1.5.8",
+    "@imqueue/pg-pubsub": "^1.5.9",
     "@imqueue/rpc": "^1.13.11",
     "@imqueue/tag-cache": "^1.2.3",
     "pg": "^8.7.1",
