@@ -1,5 +1,7 @@
 # @imqueue/pg-cache
 
+V3 uses sequelize v6.x
+
 Links `@imqueue/pg-pubsub` with `@imqueue/tag-cache` and provides generic
 way to implement intellectual cache management based on database changes
 notifications for @imqueue-based service methods.
