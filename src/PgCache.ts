@@ -24,7 +24,8 @@ import {
     ILogger,
     IMQService,
     JsonObject,
-    RedisCache, signature,
+    RedisCache,
+    signature,
 } from '@imqueue/rpc';
 import { TagCache } from '@imqueue/tag-cache';
 import { PgPubSub } from '@imqueue/pg-pubsub';
@@ -50,9 +51,19 @@ export interface PgCacheOptions {
     /**
      * Redis connection options
      *
-     * @type {{ host: string, port: number }}
+     * @type {{
+     *    host: string;
+     *    port: number;
+     *    username?: string;
+     *    password?: string;
+     * }}
      */
-    redis?: { host: string; port: number; };
+    redis?: {
+        host: string;
+        port: number;
+        username?: string;
+        password?: string;
+    };
 
     /**
      * Initialized redis cache instance. One of redis option or this redisCache
@@ -319,7 +330,7 @@ export function PgCache(options: PgCacheOptions): ClassDecorator {
                             if (needInvalidate(data, filter)) {
                                 invalidate(this, useTag);
                                 options.publish !== false && publish(
-                                    this, channel, payload, useTag,
+                                    this, channel, payload as AnyJson, useTag,
                                 );
                             }
                         }
