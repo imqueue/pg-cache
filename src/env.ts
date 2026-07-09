@@ -19,10 +19,10 @@
  * purchase a proprietary commercial license. Please contact us at
  * <support@imqueue.com> to get commercial licensing options.
  */
-import { ILogger } from '@imqueue/core';
-import { PgCacheable } from './PgCache';
+import { type ILogger } from '@imqueue/core';
+import { type PgCacheable } from './PgCache.js';
 
-export type ClassDecorator = <T extends new(...args: any[]) => {}>(
+export type ClassDecorator = <T extends new (...args: any[]) => {}>(
     constructor: T,
 ) => T & PgCacheable;
 
@@ -33,7 +33,36 @@ export type MethodDecorator = (
 ) => void;
 
 export const DEFAULT_CACHE_TTL = 86400000; // 24 hrs in milliseconds
-export const PG_CACHE_DEBUG = !!+(process.env.PG_CACHE_DEBUG || 0);
+/**
+ * Reads a boolean environment variable, accepting the human-friendly
+ * spellings 1/true/yes/on and 0/false/no/off (case-insensitive). The
+ * previous `!!+value` idiom parsed values like `true` as NaN => false.
+ *
+ * @param {string} name - environment variable name
+ * @param {boolean} [defaultValue] - used when unset or unrecognized
+ * @return {boolean}
+ */
+export function envBool(name: string, defaultValue = false): boolean {
+    const value = process.env[name];
+
+    if (typeof value !== 'string') {
+        return defaultValue;
+    }
+
+    const normalized = value.trim().toLowerCase();
+
+    if (['1', 'true', 'yes', 'on'].includes(normalized)) {
+        return true;
+    }
+
+    if (['0', 'false', 'no', 'off', ''].includes(normalized)) {
+        return false;
+    }
+
+    return defaultValue;
+}
+
+export const PG_CACHE_DEBUG = envBool('PG_CACHE_DEBUG');
 
 export const PG_CACHE_TRIGGER = `CREATE FUNCTION post_change_notify_trigger()
 RETURNS TRIGGER
@@ -95,9 +124,9 @@ export function setInfo(
     key: string,
     decorator: Function,
 ): any {
-    PG_CACHE_DEBUG && logger.info(
-        `PgCache:${ decorator.name }: cache key '${ key }' saved!`,
-    );
+    if (PG_CACHE_DEBUG) {
+        logger.info(`PgCache:${decorator.name}: cache key '${key}' saved!`);
+    }
 
     return res;
 }
@@ -109,7 +138,7 @@ export function setError(
     decorator: Function,
 ): void {
     logger.warn(
-        `PgCache:${ decorator.name }: saving cache key '${ key }' error:`,
+        `PgCache:${decorator.name}: saving cache key '${key}' error:`,
         err,
     );
 }
@@ -121,7 +150,7 @@ export function fetchError(
     decorator: Function,
 ): void {
     logger.warn(
-        `PgCache:${ decorator.name }: fetching cache key '${ key }' error:`,
+        `PgCache:${decorator.name}: fetching cache key '${key}' error:`,
         err,
     );
 }
@@ -132,7 +161,9 @@ export function initError(
     methodName: string,
     decorator: Function,
 ): void {
-    logger.warn(`PgCache:${ decorator.name }: cache is not initialized on ${
-        className }, called in ${ methodName }`,
+    logger.warn(
+        `PgCache:${decorator.name}: cache is not initialized on ${
+            className
+        }, called in ${methodName}`,
     );
 }
