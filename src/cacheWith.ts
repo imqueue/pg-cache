@@ -19,17 +19,21 @@
  * purchase a proprietary commercial license. Please contact us at
  * <support@imqueue.com> to get commercial licensing options.
  */
-import { signature } from '@imqueue/rpc';
+import { signature } from './signature.js';
 import { TagCache } from '@imqueue/tag-cache';
-import { FilteredChannels, PgCacheable, PgCacheChannel } from './PgCache';
 import {
-    MethodDecorator,
+    type FilteredChannels,
+    type PgCacheable,
+    type PgCacheChannel,
+} from './PgCache.js';
+import {
+    type MethodDecorator,
     DEFAULT_CACHE_TTL,
     fetchError,
     initError,
     setError,
     setInfo,
-} from './env';
+} from './env.js';
 
 export interface CacheWithOptions {
     /**
@@ -69,9 +73,9 @@ export function makeChannel(
     method: string,
     options: CacheWithOptions,
 ): PgCacheChannel {
-    return [method, !Array.isArray(options.channels)
-        ? (options.channels)[name]
-        : undefined,
+    return [
+        method,
+        !Array.isArray(options.channels) ? options.channels[name] : undefined,
     ] as PgCacheChannel;
 }
 
@@ -90,28 +94,29 @@ export function cacheWith(options: CacheWithOptions): MethodDecorator {
         descriptor: TypedPropertyDescriptor<(...args: any[]) => any>,
     ): void => {
         const original: Function = descriptor.value as any;
-        const className = typeof target === 'function'
-            ? target.name
-            : target.constructor.name;
+        const className =
+            typeof target === 'function'
+                ? target.name
+                : target.constructor.name;
         const ttl = options.ttl || DEFAULT_CACHE_TTL;
         const isFiltered = !Array.isArray(options.channels);
         const channels: string[] = isFiltered
             ? Object.keys(options.channels)
-            : options.channels as string[];
+            : (options.channels as string[]);
 
         target.pgCacheChannels = target.pgCacheChannels || {};
 
         for (const channel of channels) {
-            const pgChannel = target.pgCacheChannels[channel] =
-                target.pgCacheChannels[channel] || [];
+            const pgChannel = (target.pgCacheChannels[channel] =
+                target.pgCacheChannels[channel] || []);
 
             pgChannel.push(makeChannel(channel, String(methodName), options));
         }
 
-        descriptor.value = async function<T>(...args: any[]): Promise<T> {
-            const self = this || target;
+        descriptor.value = async function <T>(...args: any[]): Promise<T> {
+            const self: any = this || target;
             const cache: TagCache = self.taggedCache;
-            const logger = (self.logger || console);
+            const logger = self.logger || console;
 
             if (!cache) {
                 initError(logger, className, String(methodName), cacheWith);
@@ -133,15 +138,14 @@ export function cacheWith(options: CacheWithOptions): MethodDecorator {
 
                     const tags = [signature(className, methodName, [])];
 
-                    cache.set(key, result, tags, ttl)
+                    cache
+                        .set(key, result, tags, ttl)
                         .then(res => setInfo(logger, res, key, cacheWith))
                         .catch(err => setError(logger, err, key, cacheWith));
                 }
 
                 return result;
-            }
-
-            catch (err) {
+            } catch (err) {
                 fetchError(logger, err, key, cacheWith);
 
                 return original.apply(self, args);

@@ -1,24 +1,33 @@
 {
   "compilerOptions": {
-    "module": "commonjs",
+    "target": "es2024",
+    "lib": ["es2024"],
+    "moduleDetection": "force",
+
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "resolveJsonModule": true,
+    "esModuleInterop": true,
+    "verbatimModuleSyntax": true,
+
+    "types": ["node"],
+
+    "isolatedModules": true,
+
     "declaration": true,
-    "noImplicitAny": true,
-    "strictNullChecks": true,
-    "removeComments": false,
-    "noUnusedLocals": false,
-    "noUnusedParameters": false,
-    "moduleResolution": "node",
     "sourceMap": true,
     "inlineSources": true,
+    "removeComments": false,
+    "newLine": "lf",
+
     "experimentalDecorators": true,
     "emitDecoratorMetadata": true,
-    "esModuleInterop": false,
-    "resolveJsonModule": true,
-    "target": "esnext",
-    "lib": [
-      "dom",
-      "esnext",
-      "esnext.asynciterable"
-    ]
+
+    "skipLibCheck": true,
+
+    "strict": true,
+    "strictPropertyInitialization": false,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true
   }
 }

@@ -19,7 +19,7 @@
  * purchase a proprietary commercial license. Please contact us at
  * <support@imqueue.com> to get commercial licensing options.
  */
-export * from './env';
-export * from './PgCache';
-export * from './cacheWith';
-export * from './cacheBy';
+export * from './env.js';
+export * from './PgCache.js';
+export * from './cacheWith.js';
+export * from './cacheBy.js';

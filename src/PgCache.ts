@@ -20,17 +20,21 @@
  * <support@imqueue.com> to get commercial licensing options.
  */
 import {
-    AnyJson,
-    ILogger,
+    type AnyJson,
+    type ILogger,
     IMQService,
-    JsonObject,
+    type JsonObject,
     RedisCache,
-    signature,
 } from '@imqueue/rpc';
+import { signature } from './signature.js';
 import { TagCache } from '@imqueue/tag-cache';
 import { PgPubSub } from '@imqueue/pg-pubsub';
 import { Client } from 'pg';
-import { ClassDecorator, PG_CACHE_DEBUG, PG_CACHE_TRIGGER } from './env';
+import {
+    type ClassDecorator,
+    PG_CACHE_DEBUG,
+    PG_CACHE_TRIGGER,
+} from './env.js';
 
 export interface PgCacheOptions {
     /**
@@ -101,7 +105,7 @@ export interface PgCacheable {
 }
 
 export type PgCacheChannel = [
-    string,                    // called method name
+    string, // called method name
     ChannelFilter | undefined, // filter used to decide of invalidation
 ];
 
@@ -112,7 +116,7 @@ export interface PgCacheChannels {
 
 const RX_TRIGGER = new RegExp(
     'create\\s+(or\\s+replace)?function\\s+' +
-    'post_change_notify_trigger\\s+\\([^)]*\\).*?returns\\s+trigger',
+        'post_change_notify_trigger\\s+\\([^)]*\\).*?returns\\s+trigger',
     'i',
 );
 
@@ -152,30 +156,35 @@ async function install(
     try {
         await pg.query(triggerDefinition);
     } catch (err) {
-        PG_CACHE_DEBUG && logger.info(
-            'PgCache: create trigger function errored:', err,
-        );
+        if (PG_CACHE_DEBUG) {
+            logger.info('PgCache: create trigger function errored:', err);
+        }
     }
 
-    await Promise.all(channels.map(async channel => {
-        try {
-            await pg.query(
-                `CREATE TRIGGER "post_change_notify"
+    await Promise.all(
+        channels.map(async channel => {
+            try {
+                await pg.query(
+                    `CREATE TRIGGER "post_change_notify"
                     AFTER INSERT OR UPDATE OR DELETE
                     ON "${channel}"
                     FOR EACH ROW
                 EXECUTE PROCEDURE post_change_notify_trigger()`,
-            );
+                );
 
-            PG_CACHE_DEBUG && logger.info(
-                `PgCache: trigger created on ${ channel }!`,
-            );
-        } catch (err) {
-            PG_CACHE_DEBUG && logger.info(
-                `PgCache: create trigger on ${ channel } errored:`, err,
-            );
-        }
-    }));
+                if (PG_CACHE_DEBUG) {
+                    logger.info(`PgCache: trigger created on ${channel}!`);
+                }
+            } catch (err) {
+                if (PG_CACHE_DEBUG) {
+                    logger.info(
+                        `PgCache: create trigger on ${channel} errored:`,
+                        err,
+                    );
+                }
+            }
+        }),
+    );
 }
 
 export enum ChannelOperation {
@@ -195,7 +204,9 @@ export interface ChannelPayload {
 
 export type ChannelPayloadFilter = (payload: ChannelPayload) => boolean;
 export type ChannelFilter = ChannelOperation[] | ChannelPayloadFilter;
-export interface FilteredChannels { [channel: string]: ChannelFilter; }
+export interface FilteredChannels {
+    [channel: string]: ChannelFilter;
+}
 
 function needInvalidate(
     payload: ChannelPayload,
@@ -219,46 +230,52 @@ function publish(
     tag: string,
 ): void {
     if (typeof self.publish !== 'function') {
-        PG_CACHE_DEBUG && self.logger.info(
-            `PgCache: publish method does not exist on ${
-                self.constructor.name
-            }`);
+        if (PG_CACHE_DEBUG) {
+            self.logger.info(
+                `PgCache: publish method does not exist on ${
+                    self.constructor.name
+                }`,
+            );
+        }
 
-        return ;
+        return;
     }
 
-    (self as IMQService).publish({ channel, payload, tag })
+    (self as IMQService)
+        .publish({ channel, payload, tag })
         .then((result: any) => {
-            PG_CACHE_DEBUG && self.logger.info(
-                `PgCache: tag '${ tag }' published to client with:`,
-                channel,
-            );
+            if (PG_CACHE_DEBUG) {
+                self.logger.info(
+                    `PgCache: tag '${tag}' published to client with:`,
+                    channel,
+                );
+            }
 
             return result;
         })
-        .catch((err: any) => self.logger.warn(
-            `PgCache: error publishing '${ tag }':`, err,
-        ));
+        .catch((err: any) =>
+            self.logger.warn(`PgCache: error publishing '${tag}':`, err),
+        );
 }
 
 function invalidate(self: any & PgCacheable, tag: string): void {
-    self.taggedCache.invalidate(tag)
+    self.taggedCache
+        .invalidate(tag)
         .then((result: any) => {
-            PG_CACHE_DEBUG && self.logger.info(
-                `PgCache: key '${ tag }' invalidated!`,
-            );
+            if (PG_CACHE_DEBUG) {
+                self.logger.info(`PgCache: key '${tag}' invalidated!`);
+            }
 
             return result;
         })
-        .catch((err: any) => self.logger.warn(
-            `PgCache: error invalidating '${ tag }':`,
-            err,
-        ));
+        .catch((err: any) =>
+            self.logger.warn(`PgCache: error invalidating '${tag}':`, err),
+        );
 }
 
 // noinspection JSUnusedGlobalSymbols
 export function PgCache(options: PgCacheOptions): ClassDecorator {
-    return <T extends new(...args: any[]) => {}>(
+    return <T extends new (...args: any[]) => {}>(
         constructor: T,
     ): T & PgCacheable => {
         const init = constructor.prototype.start;
@@ -278,33 +295,35 @@ export function PgCache(options: PgCacheOptions): ClassDecorator {
                     await init.apply(this, args);
                 }
 
-                const logger = ((this as any).logger || console);
+                const logger = (this as any).logger || console;
                 const prefix = options.prefix || constructor.name;
                 let cache: RedisCache;
 
                 if (options.redisCache) {
                     cache = options.redisCache;
                 } else if (options.redis) {
-                    cache = await new RedisCache()
-                        .init({ ...options.redis, prefix, logger });
+                    cache = await new RedisCache().init({
+                        ...options.redis,
+                        prefix,
+                        logger,
+                    });
                 } else if ((this as any).cache) {
                     cache = (this as any).cache;
                 } else {
                     throw new TypeError(
                         'PgCache: either one of redisCache or ' +
-                        'redisConnectionString option must be provided!',
+                            'redisConnectionString option must be provided!',
                     );
                 }
 
                 this.taggedCache = new TagCache(cache);
 
-                const pgChannels = this.pgCacheChannels
-                    || pgCacheChannels
-                    || {};
+                const pgChannels =
+                    this.pgCacheChannels || pgCacheChannels || {};
                 const channels = Object.keys(pgChannels);
 
                 if (!(channels && channels.length)) {
-                    return ;
+                    return;
                 }
 
                 const className = constructor.name;
@@ -316,10 +335,13 @@ export function PgCache(options: PgCacheOptions): ClassDecorator {
 
                 for (const channel of channels) {
                     this.pubSub.channels.on(channel, payload => {
-                        PG_CACHE_DEBUG && logger.info(
-                            'PgCache: database event caught:',
-                            channel, payload,
-                        );
+                        if (PG_CACHE_DEBUG) {
+                            logger.info(
+                                'PgCache: database event caught:',
+                                channel,
+                                payload,
+                            );
+                        }
 
                         const methods = pgChannels[channel] || [];
                         const data = payload as unknown as ChannelPayload;
@@ -329,9 +351,15 @@ export function PgCache(options: PgCacheOptions): ClassDecorator {
 
                             if (needInvalidate(data, filter)) {
                                 invalidate(this, useTag);
-                                options.publish !== false && publish(
-                                    this, channel, payload as AnyJson, useTag,
-                                );
+
+                                if (options.publish !== false) {
+                                    publish(
+                                        this,
+                                        channel,
+                                        payload as AnyJson,
+                                        useTag,
+                                    );
+                                }
                             }
                         }
                     });
@@ -345,17 +373,25 @@ export function PgCache(options: PgCacheOptions): ClassDecorator {
                         logger,
                     );
 
-                    PG_CACHE_DEBUG && logger.info(
-                        `PgCache: triggers installed for ${ className }`,
+                    if (PG_CACHE_DEBUG) {
+                        logger.info(
+                            `PgCache: triggers installed for ${className}`,
+                        );
+                    }
+
+                    await Promise.all(
+                        channels.map(
+                            async channel => await this.pubSub.listen(channel),
+                        ),
                     );
 
-                    await Promise.all(channels.map(async channel =>
-                        await this.pubSub.listen(channel)),
-                    );
-
-                    PG_CACHE_DEBUG && logger.info(
-                        `PgCache: listening channels ${
-                            channels.join(', ') } on  ${ className }`);
+                    if (PG_CACHE_DEBUG) {
+                        logger.info(
+                            `PgCache: listening channels ${channels.join(
+                                ', ',
+                            )} on  ${className}`,
+                        );
+                    }
                 });
 
                 await this.pubSub.connect();

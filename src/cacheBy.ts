@@ -19,17 +19,17 @@
  * purchase a proprietary commercial license. Please contact us at
  * <support@imqueue.com> to get commercial licensing options.
  */
-import { PgCacheable } from './PgCache';
+import { type PgCacheable } from './PgCache.js';
 import { Model } from 'sequelize-typescript';
 import {
-    MethodDecorator,
+    type MethodDecorator,
     DEFAULT_CACHE_TTL,
     fetchError,
     initError,
     setError,
     setInfo,
-} from './env';
-import { signature } from '@imqueue/rpc';
+} from './env.js';
+import { signature } from './signature.js';
 import { TagCache } from '@imqueue/tag-cache';
 
 /**
@@ -77,7 +77,7 @@ export interface CacheByOptions {
 export function channelsOf(
     model: typeof Model,
     fields?: any,
-    tables: string[] = []
+    tables: string[] = [],
 ): string[] {
     const modelRels = model.associations;
     const relsMap = fields ? fields : model.associations;
@@ -88,7 +88,7 @@ export function channelsOf(
 
     for (const field of rels) {
         if (!modelRels[field]) {
-            continue ;
+            continue;
         }
 
         const relation = modelRels[field] as any;
@@ -121,7 +121,7 @@ export function cacheBy(
     model: typeof Model,
     options?: CacheByOptions,
 ): MethodDecorator {
-    const opts = options || {} as CacheByOptions;
+    const opts = options || ({} as CacheByOptions);
 
     return (
         target: any & PgCacheable,
@@ -129,25 +129,26 @@ export function cacheBy(
         descriptor: TypedPropertyDescriptor<(...args: any[]) => any>,
     ): void => {
         const original: Function = descriptor.value as any;
-        const className = typeof target === 'function'
-            ? target.name
-            : target.constructor.name;
+        const className =
+            typeof target === 'function'
+                ? target.name
+                : target.constructor.name;
         const ttl = opts.ttl || DEFAULT_CACHE_TTL;
         const channels: string[] = channelsOf(model);
 
         target.pgCacheChannels = target.pgCacheChannels || {};
 
         for (const channel of channels) {
-            const pgChannel = target.pgCacheChannels[channel] =
-                target.pgCacheChannels[channel] || [];
+            const pgChannel = (target.pgCacheChannels[channel] =
+                target.pgCacheChannels[channel] || []);
 
             pgChannel.push([methodName]);
         }
 
-        descriptor.value = async function<T>(...args: any[]): Promise<T> {
-            const self = this || target;
+        descriptor.value = async function <T>(...args: any[]): Promise<T> {
+            const self: any = this || target;
             const cache: TagCache = self.taggedCache;
-            const logger = (self.logger || console);
+            const logger = self.logger || console;
 
             if (!cache) {
                 initError(logger, className, String(methodName), cacheBy);
@@ -172,15 +173,14 @@ export function cacheBy(
                         signature(className, methodName, [table]),
                     );
 
-                    cache.set(key, result, tags, ttl)
+                    cache
+                        .set(key, result, tags, ttl)
                         .then(res => setInfo(logger, res, key, cacheBy))
                         .catch(err => setError(logger, err, key, cacheBy));
                 }
 
                 return result;
-            }
-
-            catch (err) {
+            } catch (err) {
                 fetchError(logger, err, key, cacheBy);
 
                 return original.apply(self, args);
