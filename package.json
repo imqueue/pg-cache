@@ -42,7 +42,7 @@
     "@imqueue/rpc": "^3.2.1",
     "@imqueue/tag-cache": "^3.0.0",
     "pg": "^8.22.0",
-    "sequelize": "^6.37.7",
+    "sequelize": "^6.37.8",
     "sequelize-typescript": "^2.1.6"
   },
   "devDependencies": {
