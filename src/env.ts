@@ -19,8 +19,19 @@
  * purchase a proprietary commercial license. Please contact us at
  * <support@imqueue.com> to get commercial licensing options.
  */
-import { type ILogger } from '@imqueue/core';
 import { type PgCacheable } from './PgCache.js';
+
+/**
+ * Minimal logger interface accepted by this package. Structurally
+ * compatible with the console object and with @imqueue loggers, so any of
+ * them can be passed without depending on @imqueue/core.
+ */
+export interface ILogger {
+    log(...args: unknown[]): void;
+    info(...args: unknown[]): void;
+    warn(...args: unknown[]): void;
+    error(...args: unknown[]): void;
+}
 
 export type ClassDecorator = <T extends new (...args: any[]) => {}>(
     constructor: T,
