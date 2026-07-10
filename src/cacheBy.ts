@@ -19,13 +19,15 @@
  * purchase a proprietary commercial license. Please contact us at
  * <support@imqueue.com> to get commercial licensing options.
  */
-import { type PgCacheable } from './PgCache.js';
 import { Model } from 'sequelize-typescript';
 import {
     type MethodDecorator,
     DEFAULT_CACHE_TTL,
+    declaringPrototype,
     fetchError,
     initError,
+    isStandardDecorator,
+    registerChannelsOnce,
     setError,
     setInfo,
 } from './env.js';
@@ -122,36 +124,36 @@ export function cacheBy(
     options?: CacheByOptions,
 ): MethodDecorator {
     const opts = options || ({} as CacheByOptions);
+    const ttl = opts.ttl || DEFAULT_CACHE_TTL;
+    const channels: string[] = channelsOf(model);
 
-    return (
-        target: any & PgCacheable,
-        methodName: string | symbol,
-        descriptor: TypedPropertyDescriptor<(...args: any[]) => any>,
-    ): void => {
-        const original: Function = descriptor.value as any;
-        const className =
-            typeof target === 'function'
-                ? target.name
-                : target.constructor.name;
-        const ttl = opts.ttl || DEFAULT_CACHE_TTL;
-        const channels: string[] = channelsOf(model);
+    // registers this method's channel entries on the declaring prototype
+    const register = (proto: any, methodName: string): void =>
+        registerChannelsOnce(proto, methodName, pgCacheChannels => {
+            for (const channel of channels) {
+                const pgChannel = (pgCacheChannels[channel] =
+                    pgCacheChannels[channel] || []);
 
-        target.pgCacheChannels = target.pgCacheChannels || {};
+                pgChannel.push([methodName]);
+            }
+        });
 
-        for (const channel of channels) {
-            const pgChannel = (target.pgCacheChannels[channel] =
-                target.pgCacheChannels[channel] || []);
-
-            pgChannel.push([methodName]);
-        }
-
-        descriptor.value = async function <T>(...args: any[]): Promise<T> {
-            const self: any = this || target;
+    // builds the caching wrapper; `getClassName` is resolved lazily so it
+    // works in standard mode where the class is unknown at decoration time
+    const wrap = (
+        original: Function,
+        methodName: string,
+        getClassName: () => string,
+        fallback?: any,
+    ) =>
+        async function <T>(this: any, ...args: any[]): Promise<T> {
+            const self: any = this || fallback;
             const cache: TagCache = self.taggedCache;
             const logger = self.logger || console;
+            const className = getClassName();
 
             if (!cache) {
-                initError(logger, className, String(methodName), cacheBy);
+                initError(logger, className, methodName, cacheBy);
 
                 return original.apply(self, args);
             }
@@ -186,5 +188,36 @@ export function cacheBy(
                 return original.apply(self, args);
             }
         };
+
+    return (target: any, context: any, descriptor?: any): any => {
+        if (isStandardDecorator(context)) {
+            const methodName = String(context.name);
+            let className = '';
+
+            context.addInitializer(function (this: any): void {
+                const proto = declaringPrototype(this, methodName);
+
+                className = proto.constructor.name;
+                register(proto, methodName);
+            });
+
+            return wrap(target as Function, methodName, () => className);
+        }
+
+        const methodName = String(context);
+        const className =
+            typeof target === 'function'
+                ? target.name
+                : target.constructor.name;
+
+        register(target, methodName);
+        descriptor.value = wrap(
+            descriptor.value as Function,
+            methodName,
+            () => className,
+            target,
+        );
+
+        return descriptor;
     };
 }

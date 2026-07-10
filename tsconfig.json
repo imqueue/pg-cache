@@ -20,8 +20,6 @@
     "removeComments": false,
     "newLine": "lf",
 
-    "experimentalDecorators": true,
-    "emitDecoratorMetadata": true,
 
     "skipLibCheck": true,
 

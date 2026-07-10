@@ -33,15 +33,92 @@ export interface ILogger {
     error(...args: unknown[]): void;
 }
 
+// The decorators in this package are dual-mode: they work both as standard
+// (TC39, stage-3) decorators and as legacy (experimentalDecorators) ones,
+// so they can be applied to @imqueue services compiled in either mode - the
+// same way @imqueue/rpc and @imqueue/core decorators behave. A standard
+// invocation passes a context object with a `kind` property, a legacy one
+// passes (target, propertyKey, descriptor).
+
+// A dual-mode class decorator is called either as (constructor) [legacy] or
+// as (value, context) [standard]; in both forms the first argument is the
+// class and it returns the (possibly augmented) class.
 export type ClassDecorator = <T extends new (...args: any[]) => {}>(
     constructor: T,
+    context?: unknown,
 ) => T & PgCacheable;
 
+// A dual-mode method decorator is called either as
+// (target, propertyKey, descriptor) [legacy] or as (value, context)
+// [standard].
 export type MethodDecorator = (
     target: any,
-    methodName: string | symbol,
-    descriptor: TypedPropertyDescriptor<(...args: any[]) => any>,
-) => void;
+    context: any,
+    descriptor?: TypedPropertyDescriptor<(...args: any[]) => any>,
+) => any;
+
+/**
+ * Returns true if the decorator was invoked in standard (TC39) mode, i.e.
+ * its second argument is a decorator context object carrying a `kind`.
+ *
+ * @param {unknown} context - the decorator's second argument
+ * @return {boolean}
+ */
+export function isStandardDecorator(context: unknown): boolean {
+    return (
+        !!context && typeof context === 'object' && 'kind' in (context as any)
+    );
+}
+
+/**
+ * Walks up from a constructed instance to the prototype that actually
+ * declares the given method, mirroring legacy decoration where the decorator
+ * target is the declaring prototype. Falls back to the instance's own
+ * prototype.
+ *
+ * @param {any} instance - `this` inside a standard decorator initializer
+ * @param {string} methodName
+ * @return {any} - the declaring prototype
+ */
+export function declaringPrototype(instance: any, methodName: string): any {
+    let proto = instance.constructor.prototype;
+
+    while (proto && !Object.prototype.hasOwnProperty.call(proto, methodName)) {
+        proto = Object.getPrototypeOf(proto);
+    }
+
+    return proto || instance.constructor.prototype;
+}
+
+/**
+ * Registers pg-cache channel entries for a method on the given prototype
+ * exactly once, even when called from a per-construction initializer.
+ *
+ * @param {any} proto - declaring prototype to attach channel metadata to
+ * @param {string} methodName - decorated method name (dedup key)
+ * @param {(channels: PgCacheChannels) => void} register - pushes entries
+ * @return {void}
+ */
+export function registerChannelsOnce(
+    proto: any,
+    methodName: string,
+    register: (channels: Record<string, unknown[]>) => void,
+): void {
+    const marker = `__pgCacheRegistered$${methodName}`;
+
+    if (proto[marker]) {
+        return;
+    }
+
+    Object.defineProperty(proto, marker, {
+        value: true,
+        enumerable: false,
+        configurable: true,
+    });
+
+    proto.pgCacheChannels = proto.pgCacheChannels || {};
+    register(proto.pgCacheChannels);
+}
 
 export const DEFAULT_CACHE_TTL = 86400000; // 24 hrs in milliseconds
 /**

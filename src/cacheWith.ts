@@ -21,16 +21,15 @@
  */
 import { signature } from './signature.js';
 import { TagCache } from '@imqueue/tag-cache';
-import {
-    type FilteredChannels,
-    type PgCacheable,
-    type PgCacheChannel,
-} from './PgCache.js';
+import { type FilteredChannels, type PgCacheChannel } from './PgCache.js';
 import {
     type MethodDecorator,
     DEFAULT_CACHE_TTL,
+    declaringPrototype,
     fetchError,
     initError,
+    isStandardDecorator,
+    registerChannelsOnce,
     setError,
     setInfo,
 } from './env.js';
@@ -88,38 +87,39 @@ export function makeChannel(
  * @return {MethodDecorator}
  */
 export function cacheWith(options: CacheWithOptions): MethodDecorator {
-    return (
-        target: any & PgCacheable,
-        methodName: string | symbol,
-        descriptor: TypedPropertyDescriptor<(...args: any[]) => any>,
-    ): void => {
-        const original: Function = descriptor.value as any;
-        const className =
-            typeof target === 'function'
-                ? target.name
-                : target.constructor.name;
-        const ttl = options.ttl || DEFAULT_CACHE_TTL;
-        const isFiltered = !Array.isArray(options.channels);
-        const channels: string[] = isFiltered
-            ? Object.keys(options.channels)
-            : (options.channels as string[]);
+    const ttl = options.ttl || DEFAULT_CACHE_TTL;
+    const isFiltered = !Array.isArray(options.channels);
+    const channels: string[] = isFiltered
+        ? Object.keys(options.channels || {})
+        : (options.channels as string[]);
 
-        target.pgCacheChannels = target.pgCacheChannels || {};
+    // registers this method's channel entries on the declaring prototype
+    const register = (proto: any, methodName: string): void =>
+        registerChannelsOnce(proto, methodName, pgCacheChannels => {
+            for (const channel of channels) {
+                const pgChannel = (pgCacheChannels[channel] =
+                    pgCacheChannels[channel] || []);
 
-        for (const channel of channels) {
-            const pgChannel = (target.pgCacheChannels[channel] =
-                target.pgCacheChannels[channel] || []);
+                pgChannel.push(makeChannel(channel, methodName, options));
+            }
+        });
 
-            pgChannel.push(makeChannel(channel, String(methodName), options));
-        }
-
-        descriptor.value = async function <T>(...args: any[]): Promise<T> {
-            const self: any = this || target;
+    // builds the caching wrapper; `getClassName` is resolved lazily so it
+    // works in standard mode where the class is unknown at decoration time
+    const wrap = (
+        original: Function,
+        methodName: string,
+        getClassName: () => string,
+        fallback?: any,
+    ) =>
+        async function <T>(this: any, ...args: any[]): Promise<T> {
+            const self: any = this || fallback;
             const cache: TagCache = self.taggedCache;
             const logger = self.logger || console;
+            const className = getClassName();
 
             if (!cache) {
-                initError(logger, className, String(methodName), cacheWith);
+                initError(logger, className, methodName, cacheWith);
 
                 return original.apply(self, args);
             }
@@ -151,5 +151,36 @@ export function cacheWith(options: CacheWithOptions): MethodDecorator {
                 return original.apply(self, args);
             }
         };
+
+    return (target: any, context: any, descriptor?: any): any => {
+        if (isStandardDecorator(context)) {
+            const methodName = String(context.name);
+            let className = '';
+
+            context.addInitializer(function (this: any): void {
+                const proto = declaringPrototype(this, methodName);
+
+                className = proto.constructor.name;
+                register(proto, methodName);
+            });
+
+            return wrap(target as Function, methodName, () => className);
+        }
+
+        const methodName = String(context);
+        const className =
+            typeof target === 'function'
+                ? target.name
+                : target.constructor.name;
+
+        register(target, methodName);
+        descriptor.value = wrap(
+            descriptor.value as Function,
+            methodName,
+            () => className,
+            target,
+        );
+
+        return descriptor;
     };
 }

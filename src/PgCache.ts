@@ -275,9 +275,13 @@ function invalidate(self: any & PgCacheable, tag: string): void {
 
 // noinspection JSUnusedGlobalSymbols
 export function PgCache(options: PgCacheOptions): ClassDecorator {
-    return <T extends new (...args: any[]) => {}>(
-        constructor: T,
-    ): T & PgCacheable => {
+    // Dual-mode: standard (TC39) class decorators pass (value, context); legacy
+    // ones pass just the constructor. In both cases the first argument is the
+    // class, and the body augments its prototype in place. In standard mode the
+    // per-method channel metadata is registered by initializers at construction
+    // time, so it is read at runtime (see start(): `this.pgCacheChannels`)
+    // rather than captured here at decoration time.
+    return ((constructor: any, _context?: any): any => {
         const init = constructor.prototype.start;
         const pgCacheChannels = constructor.prototype.pgCacheChannels;
 
@@ -406,6 +410,6 @@ export function PgCache(options: PgCacheOptions): ClassDecorator {
 
         constructor.prototype.start = CachedService.prototype.start;
 
-        return constructor as unknown as T & PgCacheable;
-    };
+        return constructor;
+    }) as ClassDecorator;
 }
