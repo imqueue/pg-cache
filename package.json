@@ -1,6 +1,6 @@
 {
   "name": "@imqueue/pg-cache",
-  "version": "5.0.0",
+  "version": "4.0.3",
   "description": "PostgreSQL managed cache on Redis for @imqueue-based service methods",
   "keywords": [
     "cache",
@@ -19,6 +19,7 @@
     "test": "npm run build && node --test --test-timeout=15000 $(find test -name '*.spec.js')",
     "test-coverage": "npm run build && node --enable-source-maps --test --experimental-test-coverage --test-timeout=15000 $(find test -name '*.spec.js')",
     "test-lcov": "npm run build && mkdir -p coverage && node --enable-source-maps --test --experimental-test-coverage --test-reporter=lcov --test-reporter-destination=coverage/lcov.info --test-timeout=15000 $(find test -name '*.spec.js'); node scripts/strip-comment-coverage.mjs coverage/lcov.info",
+    "test-coverage-html": "npm run test-lcov; genhtml coverage/lcov.info --output-directory coverage/html --ignore-errors inconsistent,corrupt,format,mismatch && echo \"Coverage report: file://$(pwd)/coverage/html/index.html\"",
     "clean-typedefs": "find . -name '*.d.ts' -not -wholename '*node_modules*' -type f -delete",
     "clean-maps": "find . -name '*.js.map' -not -wholename '*node_modules*' -type f -delete",
     "clean-js": "find . -name '*.js' -not -wholename '*node_modules*' -not -wholename '*scripts*' -type f -delete",
@@ -41,16 +42,15 @@
     "@imqueue/pg-pubsub": "^3.0.0",
     "@imqueue/rpc": "^3.2.1",
     "@imqueue/tag-cache": "^3.0.0",
-    "pg": "^8.16.3",
+    "pg": "^8.22.0",
     "sequelize": "^6.37.7",
     "sequelize-typescript": "^2.1.6"
   },
   "devDependencies": {
-    "@types/node": "^24.9.1",
-    "@types/pg": "^8.15.4",
-    "@types/validator": "^13.15.2",
-    "oxfmt": "0.57.0",
-    "oxlint": "1.72.0",
+    "@types/node": "^24.13.3",
+    "@types/pg": "^8.20.0",
+    "oxfmt": "0.58.0",
+    "oxlint": "1.73.0",
     "reflect-metadata": "^0.2.2",
     "typescript": "^7.0.2"
   },
