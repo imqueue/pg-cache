@@ -21,7 +21,6 @@
  */
 import {
     type AnyJson,
-    type ILogger,
     IMQService,
     type JsonObject,
     RedisCache,
@@ -32,6 +31,7 @@ import { PgPubSub } from '@imqueue/pg-pubsub';
 import { Client } from 'pg';
 import {
     type ClassDecorator,
+    type ILogger,
     PG_CACHE_DEBUG,
     PG_CACHE_TRIGGER,
 } from './env.js';

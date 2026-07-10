@@ -38,7 +38,6 @@
   },
   "homepage": "https://github.com/imqueue/pg-cache",
   "dependencies": {
-    "@imqueue/core": "^3.2.1",
     "@imqueue/pg-pubsub": "^3.0.0",
     "@imqueue/rpc": "^3.2.1",
     "@imqueue/tag-cache": "^3.0.0",
