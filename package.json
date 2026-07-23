@@ -36,7 +36,7 @@
   "bugs": {
     "url": "https://github.com/imqueue/pg-cache/issues"
   },
-  "homepage": "https://github.com/imqueue/pg-cache",
+  "homepage": "https://imqueue.org/",
   "dependencies": {
     "@imqueue/pg-pubsub": "^3.0.0",
     "@imqueue/rpc": "^3.2.1",
