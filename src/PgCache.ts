@@ -176,7 +176,17 @@ async function install(
                     logger.info(`PgCache: trigger created on ${channel}!`);
                 }
             } catch (err) {
-                if (PG_CACHE_DEBUG) {
+                // 42P01 (undefined_table) means the channel does not name a
+                // real table, so no NOTIFY will ever be emitted for it - a
+                // silent dead end. Every other failure here is expected on a
+                // warm database (42723: trigger already exists).
+                if ((err as { code?: string })?.code === '42P01') {
+                    logger.warn(
+                        `PgCache: channel "${channel}" is not an existing ` +
+                            'table - no trigger installed, this channel will ' +
+                            'never fire',
+                    );
+                } else if (PG_CACHE_DEBUG) {
                     logger.info(
                         `PgCache: create trigger on ${channel} errored:`,
                         err,
@@ -322,15 +332,44 @@ export function PgCache(options: PgCacheOptions): ClassDecorator {
 
                 this.taggedCache = new TagCache(cache);
 
+                const className = constructor.name;
                 const pgChannels =
                     this.pgCacheChannels || pgCacheChannels || {};
                 const channels = Object.keys(pgChannels);
 
                 if (!(channels && channels.length)) {
+                    // caching is already live at this point, so staying quiet
+                    // here yields the worst failure mode there is: a warm
+                    // cache nobody ever invalidates
+                    logger.warn(
+                        `PgCache: ${className}: no channels registered - ` +
+                            'caching is ENABLED but invalidation is DISABLED, ' +
+                            'cached reads will only expire by ttl',
+                    );
+
                     return;
                 }
 
-                const className = constructor.name;
+                // a channel name is a table name; anything else (undefined,
+                // empty, non-string) can only come from broken registration
+                // and guarantees notifications will never arrive
+                const invalidChannels = channels.filter(
+                    channel =>
+                        !channel ||
+                        channel === 'undefined' ||
+                        channel === 'null',
+                );
+
+                if (invalidChannels.length) {
+                    logger.warn(
+                        `PgCache: ${className}: ${invalidChannels.length} ` +
+                            'invalid channel name(s) registered: ' +
+                            `${invalidChannels.join(', ')} - these are not ` +
+                            'table names, so their notifications will never ' +
+                            'fire. Usually means table names were read before ' +
+                            'the models were initialized',
+                    );
+                }
                 const maxListeners = channels.length * 2;
 
                 this.pubSub.channels.setMaxListeners(maxListeners);
@@ -369,31 +408,64 @@ export function PgCache(options: PgCacheOptions): ClassDecorator {
                     });
                 }
 
+                // PgPubSub.listen() stays silent when it decides not to
+                // subscribe, so track the channels it actually confirmed
+                const listened = new Set<string>();
+
+                this.pubSub.on('listen', (channel: string) =>
+                    listened.add(channel),
+                );
+
                 this.pubSub.on('connect', async () => {
-                    await install(
-                        Object.keys(pgChannels),
-                        this.pubSub.pgClient,
-                        triggerDef(options.triggerDefinition),
-                        logger,
-                    );
-
-                    if (PG_CACHE_DEBUG) {
-                        logger.info(
-                            `PgCache: triggers installed for ${className}`,
+                    // this handler is invoked from an event emitter, so an
+                    // escaping rejection would be an unhandled one and vanish
+                    // without a trace, leaving cache on and invalidation off
+                    try {
+                        await install(
+                            Object.keys(pgChannels),
+                            this.pubSub.pgClient,
+                            triggerDef(options.triggerDefinition),
+                            logger,
                         );
-                    }
 
-                    await Promise.all(
-                        channels.map(
-                            async channel => await this.pubSub.listen(channel),
-                        ),
-                    );
+                        if (PG_CACHE_DEBUG) {
+                            logger.info(
+                                `PgCache: triggers installed for ${className}`,
+                            );
+                        }
 
-                    if (PG_CACHE_DEBUG) {
+                        await Promise.all(
+                            channels.map(
+                                async channel =>
+                                    await this.pubSub.listen(channel),
+                            ),
+                        );
+
+                        const missed = channels.filter(
+                            channel => !listened.has(channel),
+                        );
+
                         logger.info(
-                            `PgCache: listening channels ${channels.join(
-                                ', ',
-                            )} on  ${className}`,
+                            `PgCache: ${className}: listening ` +
+                                `${listened.size}/${channels.length} ` +
+                                `channels: ${[...listened].join(', ')}`,
+                        );
+
+                        if (missed.length) {
+                            logger.warn(
+                                `PgCache: ${className}: NOT listening on ` +
+                                    `${missed.length} channel(s): ` +
+                                    `${missed.join(', ')} - writes to them ` +
+                                    'will not invalidate the cache in this ' +
+                                    'process',
+                            );
+                        }
+                    } catch (err) {
+                        logger.error(
+                            `PgCache: ${className}: failed to set up ` +
+                                'invalidation - caching is ENABLED but ' +
+                                'invalidation is DISABLED:',
+                            err,
                         );
                     }
                 });
