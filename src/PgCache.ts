@@ -436,7 +436,8 @@ export function PgCache(options: PgCacheOptions): ClassDecorator {
 
                         await Promise.all(
                             channels.map(
-                                async channel => await this.pubSub.listen(channel),
+                                async channel =>
+                                    await this.pubSub.listen(channel),
                             ),
                         );
 
