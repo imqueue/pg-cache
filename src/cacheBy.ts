@@ -35,14 +35,13 @@ import { signature } from './signature.js';
 import { TagCache } from '@imqueue/tag-cache';
 
 /**
- * Options expected by @cacheBy() decorator factory
+ * Options expected by `@cacheBy`() decorator factory
  */
 export interface CacheByOptions {
     /**
      * Time to live for cached values. If not specified - default is used.
      * Default is equivalent of 24 hours. Must be specified in milliseconds.
      *
-     * @type {number | undefined}
      */
     ttl?: number;
 
@@ -54,14 +53,13 @@ export interface CacheByOptions {
      * incoming GraphQL request using fieldsMap() function from
      * graphql-fields-list package.
      *
-     * Usually pg-based @imqueue services, which utilize @imqueue/sequelize
+     * Usually pg-based `@imqueue` services, which utilize `@imqueue/sequelize`
      * package passing fields as a second argument to service methods,
      * so if this option is omitted, it will try to check for the second
      * passed argument. If you need to explicitly disable it, pass -1.
      *
      * @see https://github.com/Mikhus/graphql-fields-list
      *
-     * @type {number}
      */
     fieldsArg?: number;
 }
@@ -70,11 +68,11 @@ export interface CacheByOptions {
  * Retrieves table names as channels from the given model and filter them by
  * a given fields map, if passed. Returns result as list of table names.
  *
- * @access private
- * @param {typeof Model} model
- * @param {any} [fields]
- * @param {string[]} [tables]
- * @return {string[]}
+ * @param model - sequelize-style model whose table name and associations are
+ *                read to derive the channels
+ * @param fields - fields the cached method depends on; an association field
+ *                 pulls in that association's table as well
+ * @param tables - extra table names to watch that the model does not reach
  */
 export function channelsOf(
     model: typeof Model,
@@ -111,7 +109,7 @@ export function channelsOf(
 }
 
 /**
- * Decorator factory @cacheBy(Model, CacheByOptions)
+ * Decorator factory `@cacheBy`(Model, CacheByOptions)
  * This decorator should be used on a service methods, to set the caching
  * rules for a method. Caching rules within this decorator are defined by a
  * passed model, which is treated as a root model of the call and it analyzes

@@ -23,13 +23,26 @@ import { type PgCacheable } from './PgCache.js';
 
 /**
  * Minimal logger interface accepted by this package. Structurally
- * compatible with the console object and with @imqueue loggers, so any of
- * them can be passed without depending on @imqueue/core.
+ * compatible with the console object and with `@imqueue` loggers, so any of
+ * them can be passed without depending on `@imqueue/core.`
  */
 export interface ILogger {
+    /** General-purpose message, equivalent to `console.log`. */
     log(...args: unknown[]): void;
+
+    /**
+     * Informational message. Used for cache hits, misses and trigger
+     * installation, and only emitted when `PG_CACHE_DEBUG` is on.
+     */
     info(...args: unknown[]): void;
+
+    /**
+     * Recoverable problem. Every swallowed cache error is reported at this
+     * level, so a redis outage shows up here rather than as a thrown error.
+     */
     warn(...args: unknown[]): void;
+
+    /** Unrecoverable problem. */
     error(...args: unknown[]): void;
 }
 
@@ -40,17 +53,27 @@ export interface ILogger {
 // invocation passes a context object with a `kind` property, a legacy one
 // passes (target, propertyKey, descriptor).
 
-// A dual-mode class decorator is called either as (constructor) [legacy] or
-// as (value, context) [standard]; in both forms the first argument is the
-// class and it returns the (possibly augmented) class.
+/**
+ * A dual-mode class decorator: called as `(constructor)` by legacy
+ * (`experimentalDecorators`) TypeScript and as `(value, context)` by standard
+ * (TC39) decorators. In both forms the first argument is the class, and the
+ * result is the class augmented with {@link PgCacheable}.
+ *
+ * Supporting both is what lets this package decorate `@imqueue` services compiled
+ * in either mode, the same way `@imqueue/rpc` and `@imqueue/core` decorators do.
+ */
 export type ClassDecorator = <T extends new (...args: any[]) => {}>(
     constructor: T,
     context?: unknown,
 ) => T & PgCacheable;
 
-// A dual-mode method decorator is called either as
-// (target, propertyKey, descriptor) [legacy] or as (value, context)
-// [standard].
+/**
+ * A dual-mode method decorator: called as `(target, propertyKey, descriptor)` by
+ * legacy (`experimentalDecorators`) TypeScript and as `(value, context)` by
+ * standard (TC39) decorators.
+ *
+ * Use {@link isStandardDecorator} on the second argument to tell the two apart.
+ */
 export type MethodDecorator = (
     target: any,
     context: any,
@@ -61,8 +84,7 @@ export type MethodDecorator = (
  * Returns true if the decorator was invoked in standard (TC39) mode, i.e.
  * its second argument is a decorator context object carrying a `kind`.
  *
- * @param {unknown} context - the decorator's second argument
- * @return {boolean}
+ * @param context - the decorator's second argument
  */
 export function isStandardDecorator(context: unknown): boolean {
     return (
@@ -76,9 +98,9 @@ export function isStandardDecorator(context: unknown): boolean {
  * target is the declaring prototype. Falls back to the instance's own
  * prototype.
  *
- * @param {any} instance - `this` inside a standard decorator initializer
- * @param {string} methodName
- * @return {any} - the declaring prototype
+ * @param instance - `this` inside a standard decorator initializer
+ * @param methodName - method to locate on the prototype chain
+ * @returns the declaring prototype
  */
 export function declaringPrototype(instance: any, methodName: string): any {
     let proto = instance.constructor.prototype;
@@ -94,10 +116,9 @@ export function declaringPrototype(instance: any, methodName: string): any {
  * Registers pg-cache channel entries for a method on the given prototype
  * exactly once, even when called from a per-construction initializer.
  *
- * @param {any} proto - declaring prototype to attach channel metadata to
- * @param {string} methodName - decorated method name (dedup key)
- * @param {(channels: PgCacheChannels) => void} register - pushes entries
- * @return {void}
+ * @param proto - declaring prototype to attach channel metadata to
+ * @param methodName - decorated method name (dedup key)
+ * @param register - pushes entries
  */
 export function registerChannelsOnce(
     proto: any,
@@ -120,15 +141,22 @@ export function registerChannelsOnce(
     register(proto.pgCacheChannels);
 }
 
+/**
+ * Default lifetime of a cached entry, in milliseconds — 24 hours.
+ *
+ * A TTL is a backstop, not the primary invalidation mechanism: entries are
+ * normally dropped by a PostgreSQL change notification long before it expires.
+ * It exists so an entry cannot outlive its data indefinitely if a notification
+ * is ever missed.
+ */
 export const DEFAULT_CACHE_TTL = 86400000; // 24 hrs in milliseconds
 /**
  * Reads a boolean environment variable, accepting the human-friendly
  * spellings 1/true/yes/on and 0/false/no/off (case-insensitive). The
- * previous `!!+value` idiom parsed values like `true` as NaN => false.
+ * previous `!!+value` idiom parsed values like `true` as NaN, i.e. `false`.
  *
- * @param {string} name - environment variable name
- * @param {boolean} [defaultValue] - used when unset or unrecognized
- * @return {boolean}
+ * @param name - environment variable name
+ * @param defaultValue - used when unset or unrecognized
  */
 export function envBool(name: string, defaultValue = false): boolean {
     const value = process.env[name];
@@ -150,8 +178,34 @@ export function envBool(name: string, defaultValue = false): boolean {
     return defaultValue;
 }
 
+/**
+ * Whether verbose cache tracing is on, read once from the `PG_CACHE_DEBUG`
+ * environment variable at import time.
+ *
+ * When enabled, cache saves, fetches and trigger installation are logged at info
+ * level. Warnings are logged regardless. Because it is read at import time,
+ * changing the variable afterwards has no effect.
+ *
+ * @see {@link envBool} for the accepted spellings
+ */
 export const PG_CACHE_DEBUG = envBool('PG_CACHE_DEBUG');
 
+/**
+ * Default PL/pgSQL trigger function installed on every watched table.
+ *
+ * It builds a JSON payload of the changed row and issues `PG_NOTIFY` on a channel
+ * named after the table. The payload shape is {@link ChannelPayload}: timestamp,
+ * operation, schema, table and the row itself — `NEW` for inserts and updates,
+ * `OLD` for deletes.
+ *
+ * Column values are read out of `information_schema` and cast to TEXT, so every
+ * field arrives as a string regardless of its SQL type.
+ *
+ * Note PostgreSQL caps a NOTIFY payload at 8000 bytes; a change to a very wide
+ * row can exceed that and the notification will be rejected. Override with
+ * `PgCacheOptions.triggerDefinition` if the default does not suit — see
+ * {@link PgCacheOptions}.
+ */
 export const PG_CACHE_TRIGGER = `CREATE FUNCTION post_change_notify_trigger()
 RETURNS TRIGGER
 LANGUAGE plpgsql
@@ -206,6 +260,17 @@ END;
 $$;
 `;
 
+/**
+ * Reports a successful cache write and passes the value straight through, so it
+ * can be used inline in a return position. Logs only when
+ * {@link PG_CACHE_DEBUG} is on.
+ *
+ * @param logger - logger to report through
+ * @param res - value that was cached; returned unchanged
+ * @param key - redis key it was stored under
+ * @param decorator - decorator that performed the write, named in the message
+ * @returns `res`, unchanged
+ */
 export function setInfo(
     logger: ILogger,
     res: any,
@@ -219,6 +284,15 @@ export function setInfo(
     return res;
 }
 
+/**
+ * Reports a failed cache write at warning level. Always logs: a write failure
+ * matters even when tracing is off.
+ *
+ * @param logger - logger to report through
+ * @param err - error redis raised
+ * @param key - redis key the write targeted
+ * @param decorator - decorator that attempted the write
+ */
 export function setError(
     logger: ILogger,
     err: any,
@@ -231,6 +305,15 @@ export function setError(
     );
 }
 
+/**
+ * Reports a failed cache read at warning level. The caller then falls through to
+ * the real method, so a read failure costs latency rather than correctness.
+ *
+ * @param logger - logger to report through
+ * @param err - error redis raised
+ * @param key - redis key the read targeted
+ * @param decorator - decorator that attempted the read
+ */
 export function fetchError(
     logger: ILogger,
     err: any,
@@ -243,6 +326,16 @@ export function fetchError(
     );
 }
 
+/**
+ * Reports that a cached method ran before the cache existed — the service was
+ * decorated but `start()` has not completed, so there is nothing to read or
+ * write. The method still executes; it is simply not cached.
+ *
+ * @param logger - logger to report through
+ * @param className - service class whose cache is missing
+ * @param methodName - cached method that was called too early
+ * @param decorator - decorator that found the cache absent
+ */
 export function initError(
     logger: ILogger,
     className: string,
