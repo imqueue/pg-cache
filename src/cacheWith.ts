@@ -34,11 +34,14 @@ import {
     setInfo,
 } from './env.js';
 
+/**
+ * Options for the {@link cacheWith} method decorator: which tables invalidate the
+ * cached result, how long it may live, and the tag it is stored under.
+ */
 export interface CacheWithOptions {
     /**
      * Time to live in milliseconds. By default is equivalent to 24 hours
      *
-     * @type {number}
      */
     ttl?: number;
 
@@ -46,14 +49,12 @@ export interface CacheWithOptions {
      * PgBubSub channels to listen for invalidation. Usually channels are
      * table names.
      *
-     * @type {string[] | FilteredChannels}
      */
     channels: string[] | FilteredChannels;
 
     /**
      * Tag to use for this cache when set a value
      *
-     * @type {string}
      */
     tag?: string;
 }
@@ -61,11 +62,9 @@ export interface CacheWithOptions {
 /**
  * Makes channel entry from a given channel name, class method name and options.
  *
- * @access private
- * @param {string} name
- * @param {string} method
- * @param {CacheWithOptions} options
- * @return {PgCacheChannel}
+ * @param name - notification channel, i.e. the watched table name
+ * @param method - decorated method to invalidate when that channel fires
+ * @param options - which channels invalidate the result, its TTL and cache tag decorator options; only the per-channel filter is read here
  */
 export function makeChannel(
     name: string,
@@ -79,12 +78,11 @@ export function makeChannel(
 }
 
 /**
- * Decorator factory @cacheWith(CacheWithOptions)
+ * Decorator factory `@cacheWith`(CacheWithOptions)
  * This decorator should be used on a service methods, to set the caching
  * rules for a method.
  *
- * @param {CacheWithOptions} options
- * @return {MethodDecorator}
+ * @param options - which channels invalidate the result, its TTL and cache tag
  */
 export function cacheWith(options: CacheWithOptions): MethodDecorator {
     const ttl = options.ttl || DEFAULT_CACHE_TTL;

@@ -36,31 +36,31 @@ import {
     PG_CACHE_TRIGGER,
 } from './env.js';
 
+/**
+ * Options for the {@link PgCache} class decorator: where PostgreSQL and redis
+ * live, and how the change-notify triggers behave.
+ *
+ * Exactly one of `redis` or `redisCache` must be supplied — `redis` to let the
+ * decorator build its own connection, `redisCache` to reuse one the service
+ * already owns.
+ */
 export interface PgCacheOptions {
     /**
      * Redis cache key prefix to use. If not specified, decorated service
      * class name will be used as prefix by default.
      *
-     * @type {string}
      */
     prefix?: string;
 
     /**
      * PostgreSQL database connection string
      *
-     * @type {string}
      */
     postgres: string;
 
     /**
      * Redis connection options
      *
-     * @type {{
-     *    host: string;
-     *    port: number;
-     *    username?: string;
-     *    password?: string;
-     * }}
      */
     redis?: {
         host: string;
@@ -73,7 +73,6 @@ export interface PgCacheOptions {
      * Initialized redis cache instance. One of redis option or this redisCache
      * option is required to be provided
      *
-     * @type {RedisCache}
      */
     redisCache?: RedisCache;
 
@@ -81,7 +80,6 @@ export interface PgCacheOptions {
      * Pass false, if database channel event should not be published by service
      * to connected clients. By default is enabled = true.
      *
-     * @type {boolean}
      */
     publish?: boolean;
 
@@ -93,22 +91,54 @@ export interface PgCacheOptions {
      * or will fall back to a default trigger definition. Spaces and case is
      * ignored, 'or replace statement is allowed', if needed.
      *
-     * @type {string}
      */
     triggerDefinition?: string;
 }
 
+/**
+ * What the {@link PgCache} decorator adds to the class it is applied to. A
+ * decorated service gains these three members, so code inside the service can
+ * reach the cache and the subscription directly.
+ */
 export interface PgCacheable {
+    /**
+     * Tagged redis cache holding the memoised method results. Each entry is
+     * tagged with the tables it depends on, which is how a change notification
+     * invalidates exactly the right entries.
+     */
     taggedCache: TagCache;
+
+    /**
+     * PostgreSQL LISTEN/NOTIFY subscription the triggers publish to. One channel
+     * per watched table.
+     */
     pubSub: PgPubSub;
+
+    /**
+     * Table-to-method registry built by the {@link cacheWith} and
+     * {@link cacheBy} method decorators at class-definition time, and read when
+     * a notification arrives to decide what to invalidate.
+     */
     pgCacheChannels: PgCacheChannels;
 }
 
+/**
+ * One registered dependency of a cached method: the method to invalidate, and an
+ * optional filter narrowing which changes should trigger it.
+ *
+ * Position 0 is the decorated method name; position 1 is the filter, or
+ * `undefined` to invalidate on every change to the table.
+ */
 export type PgCacheChannel = [
     string, // called method name
     ChannelFilter | undefined, // filter used to decide of invalidation
 ];
 
+/**
+ * Registry of cached methods keyed by the PostgreSQL notification channel that
+ * invalidates them. The key is a table name: the installed trigger uses the
+ * table name as its NOTIFY channel, so the two are the same string.
+ */
 export interface PgCacheChannels {
     // key is actually a table name - which is pg notify channel
     [name: string]: PgCacheChannel[];
@@ -124,10 +154,7 @@ const RX_TRIGGER = new RegExp(
  * Checks if a given definition valid. If not - will return default trigger
  * definition.
  *
- * @see PG_CACHE_TRIGGER
- * @access private
- * @param {string} [definition]
- * @return {string}
+ * @see {@link PG_CACHE_TRIGGER}
  */
 function triggerDef(definition?: string): string {
     if (!RX_TRIGGER.test(definition + '')) {
@@ -140,12 +167,6 @@ function triggerDef(definition?: string): string {
 /**
  * Installs database triggers
  *
- * @access private
- * @param {string[]} channels
- * @param {Client} pg
- * @param {string} triggerDefinition
- * @param {ILogger} logger
- * @return {Promise<void>}
  */
 async function install(
     channels: string[],
@@ -197,23 +218,78 @@ async function install(
     );
 }
 
+/**
+ * The row-level operation that produced a change notification. Matches the
+ * PostgreSQL trigger's `TG_OP`.
+ */
 export enum ChannelOperation {
     // noinspection JSUnusedGlobalSymbols
+
+    /** A row was inserted. */
     INSERT = 'INSERT',
+
+    /** A row was updated. */
     UPDATE = 'UPDATE',
+
+    /** A row was deleted. */
     DELETE = 'DELETE',
 }
 
+/**
+ * Payload delivered on a table's notification channel by the installed trigger,
+ * describing a single row change.
+ */
 export interface ChannelPayload {
+    /**
+     * When the change occurred. Arrives JSON-encoded and is revived into a
+     * `Date` before a {@link ChannelPayloadFilter} sees it.
+     */
     timestamp: Date;
+
+    /** Which row-level operation fired the trigger. */
     operation: ChannelOperation;
+
+    /** PostgreSQL schema of the changed table. */
     schema: string;
+
+    /** Name of the changed table — also the notification channel name. */
     table: string;
+
+    /**
+     * The changed row. `NEW` for inserts and updates, `OLD` for deletes, so this
+     * is always the row the change is about.
+     */
     record: JsonObject;
 }
 
+/**
+ * Predicate deciding whether one change should invalidate the cached method.
+ *
+ * Returning `true` invalidates. Unlike the array form of {@link ChannelFilter},
+ * this reads the way you expect — see that type for the inversion.
+ */
 export type ChannelPayloadFilter = (payload: ChannelPayload) => boolean;
+
+/**
+ * Narrows which changes to a table invalidate a cached method.
+ *
+ * The two forms behave in OPPOSITE directions, which is easy to get wrong:
+ *
+ * - A {@link ChannelOperation} array is an **exclusion** list. Operations named
+ *   in it do NOT invalidate; everything else does. So `[ChannelOperation.DELETE]`
+ *   means "invalidate on inserts and updates, ignore deletes" — not "invalidate
+ *   on deletes".
+ * - A {@link ChannelPayloadFilter} is an **inclusion** predicate: it invalidates
+ *   when it returns `true`.
+ *
+ * Omitting the filter invalidates on every change to the table.
+ */
 export type ChannelFilter = ChannelOperation[] | ChannelPayloadFilter;
+
+/**
+ * Map of table name to the filter that decides which of its changes matter,
+ * for method decorators that watch several tables with different rules.
+ */
 export interface FilteredChannels {
     [channel: string]: ChannelFilter;
 }
@@ -284,6 +360,47 @@ function invalidate(self: any & PgCacheable, tag: string): void {
 }
 
 // noinspection JSUnusedGlobalSymbols
+/**
+ * Class decorator turning an `@imqueue` service into a PostgreSQL-invalidated
+ * cache: method results are memoised in redis, and PostgreSQL itself tells the
+ * service when to drop them.
+ *
+ * It installs a change-notify trigger on every table the service's
+ * {@link cacheWith} and {@link cacheBy} decorators declare a dependency on, and
+ * subscribes to one LISTEN/NOTIFY channel per table. When a row changes, the
+ * matching cached results are invalidated by tag — so a cache entry lives exactly
+ * as long as the data behind it is unchanged, rather than for a guessed TTL.
+ *
+ * ```typescript
+ * import { PgCache, cacheWith } from '@imqueue/pg-cache';
+ *
+ * @PgCache({
+ *     postgres: process.env.DB_URL!,
+ *     redis: { host: 'localhost', port: 6379 },
+ * })
+ * class UserService extends IMQService {
+ *     @cacheWith({ channels: ['users'] })
+ *     public async list(): Promise<User[]> { ... }
+ * }
+ * ```
+ *
+ * Applied to the class, it wraps `start()`: the subscription and the triggers are
+ * established there, after any existing `start()` implementation has run. So the
+ * cache is inert until the service is started, and a service that never calls
+ * `start()` is never cached.
+ *
+ * Works both as a standard (TC39) decorator and as a legacy
+ * (`experimentalDecorators`) one, matching `@imqueue/rpc`, so it can be applied in
+ * either compilation mode.
+ *
+ * Redis is resolved in order: `options.redisCache`, then `options.redis`, then a
+ * `cache` property already on the service. If none is available `start()` throws.
+ *
+ * @param options - PostgreSQL and redis connection details, plus the cache-key
+ *                  prefix, publication and trigger-definition overrides
+ * @returns the class decorator to apply, which augments the class with
+ *          {@link PgCacheable}
+ */
 export function PgCache(options: PgCacheOptions): ClassDecorator {
     // Dual-mode: standard (TC39) class decorators pass (value, context); legacy
     // ones pass just the constructor. In both cases the first argument is the

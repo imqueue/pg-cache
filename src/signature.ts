@@ -37,8 +37,8 @@ import { hash } from 'node:crypto';
  *   of throwing. Repeated non-circular references to the same object are
  *   serialized in full each time, exactly as `JSON.stringify` does.
  *
- * @param {unknown} value - value to serialize
- * @param {object[]} ancestors - stack of objects on the current descent path,
+ * @param value - value to serialize
+ * @param ancestors - stack of objects on the current descent path,
  *  used for cycle detection
  * @returns {string | undefined} - the serialized value, or `undefined` where
  *  JSON would omit it (`undefined`, functions, and symbols)
@@ -106,9 +106,9 @@ function serialize(value: unknown, ancestors: object[]): string | undefined {
  * differ only in key insertion order produce the same signature, and circular
  * arguments are handled without throwing.
  *
- * @param {string} className - name of the class the method belongs to
- * @param {string | symbol} methodName - name of the method being called
- * @param {readonly unknown[]} args - arguments passed to the method
+ * @param className - name of the class the method belongs to
+ * @param methodName - name of the method being called
+ * @param args - arguments passed to the method
  * @returns {string} - hexadecimal hash string
  */
 export function signature(
