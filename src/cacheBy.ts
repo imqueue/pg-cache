@@ -53,7 +53,7 @@ export interface CacheByOptions {
      * incoming GraphQL request using fieldsMap() function from
      * graphql-fields-list package.
      *
-     * Usually pg-based `@imqueue` services, which utilize `@imqueue/sequelize`
+     * Usually pg-based `@imqueue` services, which utilize `@imqueue/pg-sequelize`
      * package passing fields as a second argument to service methods,
      * so if this option is omitted, it will try to check for the second
      * passed argument. If you need to explicitly disable it, pass -1.

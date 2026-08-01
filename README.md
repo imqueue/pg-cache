@@ -61,7 +61,7 @@ import {
     OrderByInput,
     PaginationInput,
     query,
-} from '@imqueue/sequelize';
+} from '@imqueue/pg-sequelize';
 import { cacheConfig } from '../config';
 import { MyDbEntity } from './orm/models';
 import { MyDbEntityFilter } from './types';
