@@ -4,11 +4,18 @@
   "description": "PostgreSQL managed cache on Redis for @imqueue-based service methods",
   "keywords": [
     "cache",
+    "caching",
+    "cache-invalidation",
     "redis",
     "postgres",
     "postgresql",
+    "listen-notify",
+    "decorator",
     "imqueue",
-    "services"
+    "services",
+    "microservices",
+    "nodejs",
+    "typescript"
   ],
   "scripts": {
     "prepare": "npm run build",
@@ -31,7 +38,7 @@
   "license": "GPL-3.0-only",
   "repository": {
     "type": "git",
-    "url": "git://github.com/imqueue/pg-pubsub.git"
+    "url": "git://github.com/imqueue/pg-cache.git"
   },
   "bugs": {
     "url": "https://github.com/imqueue/pg-cache/issues"
