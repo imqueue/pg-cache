@@ -43,6 +43,31 @@ different TTL to be used, do it as:
 
 In this example TTL is set to 5 minutes. TTL should be provided in milliseconds.
 
+### Start-up
+
+`start()` does not resolve until the change-notify triggers are installed and
+every channel is subscribed, so a row changed immediately after start-up is
+always noticed. That costs a few tens of milliseconds at boot, and it is what
+makes `await service.start()` a safe point to begin serving traffic — before it,
+a value could be cached that nothing would invalidate, and it would then stand
+until the next change to one of its tables, or the TTL.
+
+If that setup fails, or is not confirmed within `invalidationTimeout` (30 seconds
+by default), the service still caches and reports the failure loudly: entries
+then expire by TTL alone. Where that is the wrong trade, ask for caching to be
+switched off instead of left uninvalidated:
+
+~~~typescript
+@PgCache({
+    postgres: 'postgres://localhost:5432/db-name',
+    redis: { host: 'localhost', port: 6379 },
+    requireInvalidation: true, // no invalidation, no caching
+})
+~~~
+
+The same applies to a service with no channels registered at all, since nothing
+could ever invalidate its entries.
+
 ### Using @cacheBy
 
 Since v2.0.0 @cacheBy decorator introduced and helps simplify caching 

@@ -32,6 +32,8 @@ import { Client } from 'pg';
 import {
     type ClassDecorator,
     type ILogger,
+    awaitInvalidation,
+    DEFAULT_INVALIDATION_TIMEOUT,
     PG_CACHE_DEBUG,
     PG_CACHE_TRIGGER,
 } from './env.js';
@@ -93,6 +95,40 @@ export interface PgCacheOptions {
      *
      */
     triggerDefinition?: string;
+
+    /**
+     * Pass true to refuse to cache at all when invalidation could not be
+     * established. Off by default.
+     *
+     * @remarks
+     * Regardless of this option, `start()` does not resolve until the triggers
+     * and channel subscriptions are confirmed, so a row changed right after
+     * start-up is always noticed. This option covers what happens when that
+     * setup *fails* — or when no channels were registered, so nothing could ever
+     * invalidate the entries.
+     *
+     * By default such a service still caches, and its entries then expire by ttl
+     * alone; the ttl defaults to 24 hours ({@link DEFAULT_CACHE_TTL}), so that is
+     * how stale a value can get. Pass true where that is the wrong trade and the
+     * service should run uncached instead, paying latency to avoid serving
+     * something nothing will ever invalidate.
+     */
+    requireInvalidation?: boolean;
+
+    /**
+     * How long `start()` waits for the change-notify triggers and the channel
+     * subscriptions to be confirmed, in milliseconds. Defaults to
+     * {@link DEFAULT_INVALIDATION_TIMEOUT}; a non-positive value falls back to
+     * the same.
+     *
+     * @remarks
+     * On expiry `start()` resolves with a warning rather than hanging: a database
+     * that accepts a connection but never confirms the subscription is a broken
+     * deployment, and a service that cannot invalidate is still a service that
+     * works. Whether it then caches is
+     * {@link PgCacheOptions.requireInvalidation}.
+     */
+    invalidationTimeout?: number;
 }
 
 /**
@@ -105,6 +141,14 @@ export interface PgCacheable {
      * Tagged redis cache holding the memoised method results. Each entry is
      * tagged with the tables it depends on, which is how a change notification
      * invalidates exactly the right entries.
+     *
+     * @remarks
+     * Absent until invalidation is live: `start()` publishes it once the triggers
+     * are installed and the channels subscribed, and does not resolve before
+     * then. If that setup fails it is published anyway, so behaviour is
+     * unchanged for a service that cannot subscribe — unless
+     * {@link PgCacheOptions.requireInvalidation} says otherwise, in which case it
+     * stays absent and the method decorators simply run the method, uncached.
      */
     taggedCache: TagCache;
 
@@ -389,6 +433,13 @@ function invalidate(self: any & PgCacheable, tag: string): void {
  * cache is inert until the service is started, and a service that never calls
  * `start()` is never cached.
  *
+ * Awaiting `start()` is enough — it does not resolve until the triggers exist and
+ * the channels are subscribed, so a row changed immediately afterwards cannot go
+ * unnoticed. That costs a few tens of milliseconds at boot. If the setup fails,
+ * or is not confirmed within {@link PgCacheOptions.invalidationTimeout}, the
+ * service still caches and reports the failure loudly; pass
+ * {@link PgCacheOptions.requireInvalidation} to have it run uncached instead.
+ *
  * Works both as a standard (TC39) decorator and as a legacy
  * (`experimentalDecorators`) one, matching `@imqueue/rpc`, so it can be applied in
  * either compilation mode.
@@ -447,7 +498,17 @@ export function PgCache(options: PgCacheOptions): ClassDecorator {
                     );
                 }
 
-                this.taggedCache = new TagCache(cache);
+                // built here, but deliberately NOT published on the instance
+                // yet: the method decorators treat a missing taggedCache as
+                // "not cacheable" and run the method, so withholding it is how
+                // caching stays off until invalidation is live. start() does not
+                // resolve until it is published one way or the other, so no
+                // caller ever observes the gap
+                const taggedCache = new TagCache(cache);
+
+                // when invalidation cannot be established at all, caching still
+                // happens unless the service asked for the stricter trade
+                const cacheAnyway = options.requireInvalidation !== true;
 
                 const className = constructor.name;
                 const pgChannels =
@@ -455,14 +516,18 @@ export function PgCache(options: PgCacheOptions): ClassDecorator {
                 const channels = Object.keys(pgChannels);
 
                 if (!(channels && channels.length)) {
-                    // caching is already live at this point, so staying quiet
-                    // here yields the worst failure mode there is: a warm
-                    // cache nobody ever invalidates
                     logger.warn(
                         `PgCache: ${className}: no channels registered - ` +
-                            'caching is ENABLED but invalidation is DISABLED, ' +
-                            'cached reads will only expire by ttl',
+                            'nothing can ever invalidate this cache, so ' +
+                            (cacheAnyway
+                                ? 'cached reads will only expire by ttl'
+                                : 'caching stays OFF ' +
+                                  '(requireInvalidation is on)'),
                     );
+
+                    if (cacheAnyway) {
+                        this.taggedCache = taggedCache;
+                    }
 
                     return;
                 }
@@ -533,10 +598,9 @@ export function PgCache(options: PgCacheOptions): ClassDecorator {
                     listened.add(channel),
                 );
 
-                this.pubSub.on('connect', async () => {
-                    // this handler is invoked from an event emitter, so an
-                    // escaping rejection would be an unhandled one and vanish
-                    // without a trace, leaving cache on and invalidation off
+                // installs the triggers and subscribes, then publishes the tag
+                // cache: caching becomes live exactly when invalidation does
+                const establish = async (): Promise<void> => {
                     try {
                         await install(
                             Object.keys(pgChannels),
@@ -577,17 +641,65 @@ export function PgCache(options: PgCacheOptions): ClassDecorator {
                                     'process',
                             );
                         }
+
+                        this.taggedCache = taggedCache;
                     } catch (err) {
                         logger.error(
                             `PgCache: ${className}: failed to set up ` +
-                                'invalidation - caching is ENABLED but ' +
-                                'invalidation is DISABLED:',
+                                'invalidation - ' +
+                                (cacheAnyway
+                                    ? 'caching is ENABLED but invalidation is ' +
+                                      'DISABLED'
+                                    : 'caching stays OFF') +
+                                ':',
                             err,
                         );
+
+                        if (cacheAnyway) {
+                            this.taggedCache = taggedCache;
+                        }
                     }
+                };
+
+                // this work runs from a `connect` handler, which an event
+                // emitter cannot await, so it is captured for start() to await
+                // below. The promise is created before connect() so it cannot
+                // matter whether 'connect' is emitted before or after that call
+                // resolves; an escaping rejection would be an unhandled one and
+                // vanish without a trace, leaving cache on and invalidation off,
+                // so establish() never rejects.
+                let markReady: () => void = () => undefined;
+                const invalidationReady = new Promise<void>(
+                    resolve => (markReady = resolve),
+                );
+
+                this.pubSub.on('connect', () => {
+                    void establish().then(markReady);
                 });
 
                 await this.pubSub.connect();
+
+                // without this, start() resolves while the cache is live and
+                // nothing can invalidate it yet, and a row changed in that
+                // window is never noticed - the entry then stands until the
+                // next change to one of its tables, or the ttl
+                const confirmed = await awaitInvalidation(
+                    invalidationReady,
+                    options.invalidationTimeout ?? DEFAULT_INVALIDATION_TIMEOUT,
+                    () =>
+                        logger.warn(
+                            `PgCache: ${className}: invalidation was not ` +
+                                'confirmed in time - ' +
+                                (cacheAnyway
+                                    ? 'caching is ENABLED but invalidation is ' +
+                                      'DISABLED'
+                                    : 'caching stays OFF'),
+                        ),
+                );
+
+                if (!confirmed && cacheAnyway) {
+                    this.taggedCache = taggedCache;
+                }
             }
         }
 

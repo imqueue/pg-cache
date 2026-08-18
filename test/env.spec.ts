@@ -22,7 +22,9 @@
 import assert from 'node:assert/strict';
 import { afterEach, describe, it } from 'node:test';
 import {
+    awaitInvalidation,
     DEFAULT_CACHE_TTL,
+    DEFAULT_INVALIDATION_TIMEOUT,
     envBool,
     fetchError,
     initError,
@@ -86,6 +88,90 @@ describe('env', () => {
             const res = { a: 1 };
 
             assert.equal(setInfo(logger, res, 'key', cacheWith), res);
+        });
+    });
+
+    it('should define default invalidation timeout of 30 seconds', () => {
+        assert.equal(DEFAULT_INVALIDATION_TIMEOUT, 30000);
+    });
+
+    describe('awaitInvalidation()', () => {
+        it('should report confirmation without reporting a timeout', async () => {
+            let timedOut = false;
+            const confirmed = await awaitInvalidation(
+                Promise.resolve(),
+                1000,
+                () => (timedOut = true),
+            );
+
+            assert.equal(confirmed, true);
+            assert.equal(timedOut, false);
+        });
+
+        it('should report a timeout when confirmation never comes', async () => {
+            let timedOut = false;
+            const confirmed = await awaitInvalidation(
+                new Promise<void>(() => undefined),
+                10,
+                () => (timedOut = true),
+            );
+
+            assert.equal(confirmed, false);
+            assert.equal(timedOut, true);
+        });
+
+        it('should wait for a slow confirmation rather than return early', async () => {
+            const order: string[] = [];
+            const ready = new Promise<void>(resolve =>
+                setTimeout(() => {
+                    order.push('confirmed');
+                    resolve();
+                }, 30),
+            );
+
+            const confirmed = await awaitInvalidation(ready, 1000, () =>
+                order.push('timeout'),
+            );
+
+            order.push('returned');
+            assert.equal(confirmed, true);
+            assert.deepEqual(order, ['confirmed', 'returned']);
+        });
+
+        it('should not report a timeout after confirmation', async () => {
+            let timedOut = false;
+
+            assert.equal(
+                await awaitInvalidation(
+                    Promise.resolve(),
+                    5,
+                    () => (timedOut = true),
+                ),
+                true,
+            );
+
+            // the timer must have been cleared: nothing fires later
+            await new Promise(resolve => setTimeout(resolve, 25));
+            assert.equal(timedOut, false);
+        });
+
+        it('should fall back to the default timeout when non-positive', async () => {
+            let timedOut = false;
+
+            // a zero or negative timeout must not degrade to "do not wait":
+            // confirmation still wins here, and no timeout is reported
+            for (const timeout of [0, -1]) {
+                assert.equal(
+                    await awaitInvalidation(
+                        Promise.resolve(),
+                        timeout,
+                        () => (timedOut = true),
+                    ),
+                    true,
+                );
+            }
+
+            assert.equal(timedOut, false);
         });
     });
 

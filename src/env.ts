@@ -327,9 +327,9 @@ export function fetchError(
 }
 
 /**
- * Reports that a cached method ran before the cache existed — the service was
- * decorated but `start()` has not completed, so there is nothing to read or
- * write. The method still executes; it is simply not cached.
+ * Reports that a cached method ran while the cache was absent — either `start()`
+ * has not completed, or invalidation could not be established and caching was
+ * therefore left off. The method still executes; it is simply not cached.
  *
  * @param logger - logger to report through
  * @param className - service class whose cache is missing
@@ -347,4 +347,60 @@ export function initError(
             className
         }, called in ${methodName}`,
     );
+}
+
+/**
+ * Default time `start()` waits for the change-notify triggers and the channel
+ * subscriptions to be confirmed, in milliseconds.
+ *
+ * @remarks
+ * Reaching it means the database accepted a connection but the invalidation
+ * setup never finished, which is a broken deployment rather than a slow one:
+ * long enough not to trip on a loaded database, short enough that a service
+ * cannot sit in `start()` indefinitely.
+ */
+export const DEFAULT_INVALIDATION_TIMEOUT = 30000;
+
+/**
+ * Waits for invalidation to be confirmed, but never longer than `timeout`.
+ *
+ * @remarks
+ * This is what keeps `start()` honest. The triggers are installed and the
+ * channels subscribed from a `connect` event handler, so without waiting for
+ * that work `start()` resolves while the cache is already live and nothing can
+ * invalidate it. Waiting forever is not an option either — a database that
+ * connects but never confirms would hang start-up — so an expired wait reports
+ * itself through `onTimeout` and lets the caller continue with caching off.
+ *
+ * The timer is always cleared, so a confirmed subscription never leaves a
+ * pending timeout behind.
+ *
+ * @param ready - resolves once invalidation is established; it must never
+ *  reject, because a rejection here would escape the caller's `start()`
+ * @param timeout - milliseconds to wait; a non-positive value falls back to
+ *  {@link DEFAULT_INVALIDATION_TIMEOUT}
+ * @param onTimeout - called if the wait expires first, to report it
+ * @returns true if invalidation was confirmed, false if the wait expired
+ */
+export async function awaitInvalidation(
+    ready: Promise<void>,
+    timeout: number,
+    onTimeout: () => void,
+): Promise<boolean> {
+    const ms = timeout > 0 ? timeout : DEFAULT_INVALIDATION_TIMEOUT;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+
+    try {
+        return await Promise.race([
+            ready.then(() => true),
+            new Promise<boolean>(resolve => {
+                timer = setTimeout(() => {
+                    onTimeout();
+                    resolve(false);
+                }, ms);
+            }),
+        ]);
+    } finally {
+        clearTimeout(timer);
+    }
 }
