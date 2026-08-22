@@ -1,10 +1,18 @@
 # @imqueue/pg-cache
 
+[![Build Status](https://img.shields.io/github/actions/workflow/status/imqueue/pg-cache/build.yml)](https://github.com/imqueue/pg-cache/actions/workflows/build.yml)
+[![npm version](https://img.shields.io/npm/v/@imqueue/pg-cache)](https://www.npmjs.com/package/@imqueue/pg-cache)
+[![License](https://img.shields.io/badge/license-GPL-blue.svg)](https://github.com/imqueue/pg-cache/blob/master/LICENSE)
+
 V3 uses sequelize v6.x
 
 Links `@imqueue/pg-pubsub` with `@imqueue/tag-cache` and provides generic
 way to implement intellectual cache management based on database changes
 notifications for @imqueue-based service methods.
+
+**Using an AI assistant?** Point it at [imqueue.org/llms.txt](https://imqueue.org/llms.txt)
+for a machine-readable index of the docs. Current version, licence and Node floor
+for every package: [imqueue.org/status.json](https://imqueue.org/status.json).
 
 ## Usage
 
