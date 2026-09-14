@@ -46,7 +46,7 @@
   "homepage": "https://imqueue.org/",
   "dependencies": {
     "@imqueue/pg-pubsub": "^3.0.8",
-    "@imqueue/rpc": "^3.9.1",
+    "@imqueue/rpc": "^3.9.3",
     "@imqueue/tag-cache": "^3.0.9",
     "pg": "^8.22.0",
     "sequelize": "^6.37.8",
